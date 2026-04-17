@@ -4,8 +4,13 @@ import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { blueprints } from "../schema";
 
+interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+}
+
 type D1Database = {
-  prepare: (query: string) => unknown;
+  prepare: (query: string) => D1PreparedStatement;
 };
 
 interface Env {
@@ -123,6 +128,16 @@ export default {
         if (request.method === "POST") {
           return await handlePostBlueprint(request, env);
         }
+      }
+
+      const historyMatch = url.pathname.match(/^\/api\/history\/([^/]+)$/);
+      if (historyMatch && request.method === "GET") {
+        const username = decodeURIComponent(historyMatch[1]);
+        const stmt = env.DB.prepare(
+          "SELECT * FROM enterprise_events WHERE developer = ? ORDER BY id DESC LIMIT 5"
+        ).bind(username);
+        const { results } = await stmt.all();
+        return json({ status: "success", data: results });
       }
 
       return json({ status: "error", message: "Not Found" }, 404);
