@@ -16,7 +16,21 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // --- Middleware ---
-app.use(cors({ origin: 'http://localhost:1420' }));
+const DEFAULT_ORIGINS = 'http://localhost:1420,tauri://localhost,https://tauri.localhost';
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS)
+  .split(',')
+  .map(o => o.trim());
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Tauri desktop, Postman, curl)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
+}));
 app.use(express.json());
 
 // --- Type Definitions ---
@@ -25,9 +39,22 @@ interface CollaborateRequest {
   local_context: {
     error_log?: string;
     teammate_recent_code?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
+  branch?: string;
 }
+
+interface CollaborateSuccessResponse {
+  status: 'success';
+  text: string;
+}
+
+interface CollaborateErrorResponse {
+  status: 'error';
+  message: string;
+}
+
+type CollaborateResponse = CollaborateSuccessResponse | CollaborateErrorResponse;
 
 // --- Sentinel System Prompt ---
 const SENTINEL_SYSTEM_PROMPT = `You are Sentinel, an enterprise context router. Use the uncommitted teammate code provided in the context to explain why the user's app is breaking.
@@ -42,15 +69,16 @@ Rules:
 5. Maintain a professional and direct tone.`;
 
 // --- Routes ---
-app.post('/api/collaborate', async (req: Request, res: Response): Promise<any> => {
+app.post('/api/collaborate', async (req: Request, res: Response<CollaborateResponse>): Promise<void> => {
   try {
-    const { user_query, local_context } = req.body as CollaborateRequest;
+    const { user_query, local_context, branch } = req.body as CollaborateRequest;
 
     if (!user_query || !local_context) {
-      return res.status(400).json({ status: 'error', message: 'Missing user_query or local_context' });
+      res.status(400).json({ status: 'error', message: 'Missing user_query or local_context' });
+      return;
     }
 
-    const prompt = `User Query: ${user_query}\n\nLocal Context:\n${JSON.stringify(local_context, null, 2)}`;
+    const prompt = `Branch: ${branch ?? 'unknown'}\nUser Query: ${user_query}\n\nLocal Context:\n${JSON.stringify(local_context, null, 2)}`;
 
     let result;
     try {
@@ -59,19 +87,24 @@ app.post('/api/collaborate', async (req: Request, res: Response): Promise<any> =
         system: SENTINEL_SYSTEM_PROMPT,
         prompt,
       });
-    } catch {
-      console.warn('Primary model unavailable, falling back to llama3.1-8b...');
-      result = await generateText({
-        model: cerebras.chat('llama3.1-8b'),
-        system: SENTINEL_SYSTEM_PROMPT,
-        prompt,
-      });
+    } catch (primaryError) {
+      console.warn('[Sentinel] Primary model (llama-3.3-70b) failed — attempting fallback.', primaryError);
+      try {
+        result = await generateText({
+          model: cerebras.chat('llama3.1-8b'),
+          system: SENTINEL_SYSTEM_PROMPT,
+          prompt,
+        });
+      } catch (fallbackError) {
+        console.error('[Sentinel] Fallback model (llama3.1-8b) also failed.', { primaryError, fallbackError });
+        throw fallbackError;
+      }
     }
 
-    return res.json({ status: 'success', text: result.text });
+    res.json({ status: 'success', text: result.text });
   } catch (error) {
     console.error('Error in /api/collaborate:', error);
-    return res.status(500).json({ status: 'error', message: 'Internal server error' });
+    res.status(500).json({ status: 'error', message: 'Internal server error' });
   }
 });
 
