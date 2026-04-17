@@ -15,6 +15,7 @@ const cerebras = createOpenAI({
 });
 
 const app = express();
+const port = 3000;
 const PRIMARY_MODEL   = process.env.CEREBRAS_PRIMARY_MODEL   || 'llama3.1-8b';
 const FALLBACK_MODEL  = process.env.CEREBRAS_FALLBACK_MODEL  || 'llama3.1-8b';
 

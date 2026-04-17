@@ -52,6 +52,10 @@ export async function checkPiecesConnection(): Promise<PiecesConnectionStatus> {
 function createPiecesConfig(): Configuration {
   return new Configuration({
     basePath: PIECES_OS_BASE_URL,
+    headers: {
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+    },
   });
 }
 
@@ -139,24 +143,29 @@ export async function getRecentCodeSnippets(limit = 5): Promise<string[]> {
     const assets = await assetsApi.assetsSnapshot({ transferables: true });
     const iterable = assets?.iterable ?? [];
 
+    console.log("Total assets found in Pieces:", iterable.length);
+
     if (iterable.length === 0) {
       return [];
     }
 
-    const codeAssets = iterable.filter(isCodeAsset);
-    const primary = codeAssets.filter((asset) => asset.mechanism === "MANUAL");
-    const prioritized = (primary.length > 0 ? primary : codeAssets).sort(
+    // Sort ALL assets newest-first — no classification filter
+    const sorted = [...iterable].sort(
       (a, b) => getAssetRecency(b) - getAssetRecency(a),
     );
+
+    console.log("Assets (sorted newest-first):", sorted.length);
 
     const snippets: string[] = [];
     const seen = new Set<string>();
 
-    for (const asset of prioritized) {
+    for (const asset of sorted) {
       const snippet = extractRawTextFromAsset(asset);
       if (!snippet || seen.has(snippet)) {
         continue;
       }
+
+      console.log("Extracted snippet preview:", snippet.substring(0, 30));
 
       seen.add(snippet);
       snippets.push(snippet);
@@ -166,28 +175,9 @@ export async function getRecentCodeSnippets(limit = 5): Promise<string[]> {
       }
     }
 
-    if (snippets.length < safeLimit && prioritized !== codeAssets) {
-      const fallback = codeAssets
-        .slice()
-        .sort((a, b) => getAssetRecency(b) - getAssetRecency(a));
-
-      for (const asset of fallback) {
-        const snippet = extractRawTextFromAsset(asset);
-        if (!snippet || seen.has(snippet)) {
-          continue;
-        }
-
-        seen.add(snippet);
-        snippets.push(snippet);
-
-        if (snippets.length >= safeLimit) {
-          break;
-        }
-      }
-    }
-
     return snippets;
-  } catch {
+  } catch (error) {
+    console.error("[Pieces] Failed to fetch code snippets:", error);
     return [];
   }
 }
