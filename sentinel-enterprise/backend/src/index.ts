@@ -13,7 +13,9 @@ const cerebras = createOpenAI({
 });
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port            = process.env.PORT                     || 3000;
+const PRIMARY_MODEL   = process.env.CEREBRAS_PRIMARY_MODEL   || 'llama3.1-8b';
+const FALLBACK_MODEL  = process.env.CEREBRAS_FALLBACK_MODEL  || 'llama3.1-8b';
 
 // --- Middleware ---
 const DEFAULT_ORIGINS = 'http://localhost:1420,tauri://localhost,https://tauri.localhost';
@@ -83,20 +85,20 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
     let result;
     try {
       result = await generateText({
-        model: cerebras.chat('llama-3.3-70b'),
+        model: cerebras.chat(PRIMARY_MODEL),
         system: SENTINEL_SYSTEM_PROMPT,
         prompt,
       });
     } catch (primaryError) {
-      console.warn('[Sentinel] Primary model (llama-3.3-70b) failed — attempting fallback.', primaryError);
+      console.warn(`[Sentinel] Primary model (${PRIMARY_MODEL}) failed — attempting fallback.`, primaryError);
       try {
         result = await generateText({
-          model: cerebras.chat('llama3.1-8b'),
+          model: cerebras.chat(FALLBACK_MODEL),
           system: SENTINEL_SYSTEM_PROMPT,
           prompt,
         });
       } catch (fallbackError) {
-        console.error('[Sentinel] Fallback model (llama3.1-8b) also failed.', { primaryError, fallbackError });
+        console.error(`[Sentinel] Fallback model (${FALLBACK_MODEL}) also failed.`, { primaryError, fallbackError });
         throw fallbackError;
       }
     }
