@@ -1,11 +1,8 @@
-import React, { useEffect, useState } from "react";
-import {
-  checkPiecesConnection,
-  getRecentCodeSnippets,
-  packageLocalContext,
-} from "./lib/pieces";
+import React, { useEffect, useRef, useState } from "react";
+import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
 import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
+import { askSentinelAI } from "./lib/api";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -23,7 +20,7 @@ import {
   Search, 
   Shield, 
   Terminal, 
-  LineChart,
+  Loader2,
   Signal,
   MoreVertical,
   LayoutGrid,
@@ -41,22 +38,31 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
+import { MemberProfile } from "@/components/MemberProfile";
 
 const MOCK_TEAM_CONTEXT = [
-  { id: 1, name: "David (Backend)", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png" },
-  { id: 2, name: "Sarah (Frontend)", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png" },
-  { id: 3, name: "Alex (DevOps)", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png" }
+  { id: 1, name: "David", role: "Backend Engineer", department: "Architecture", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png", branch: "feature/auth-refactor", uptime: "04:12:33", tasks: ["Implement OAuth2 providers", "Secure session tokens", "DB migration scripts"] },
+  { id: 2, name: "Sarah", role: "Frontend Lead", department: "Interface", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png", branch: "mainline/core-sync", uptime: "02:45:10", tasks: ["Button interaction states", "Review PR #412", "Update design tokens"] },
+  { id: 3, name: "Alex", role: "DevOps Engineer", department: "Platform Ops", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png", branch: "infra/k8s-cluster", uptime: "12:00:00", tasks: ["Deploy staging servers", "Rotate CI/CD secrets", "Monitor cluster health"] }
 ];
 
-const MOCK_MESSAGES = [
-  { id: 1, sender: "David (Backend)", content: "Hey Sarah, I just finished the auth endpoint. Can you check if the frontend is receiving the 201 status code correctly?", time: "10:24 AM" },
-  { id: 2, sender: "Sarah (Frontend)", content: "On it! I'm currently looking at Button.tsx to see if we need a global transition for the loading state.", time: "10:25 AM" },
-  { id: 3, sender: "Sentinel AI", content: "I've detected a potential race condition in `src/api/auth.ts` related to the session storage. Would you like me to analyze the trace?", time: "10:26 AM", isAI: true },
-];
+interface ChatMessage {
+  id: number;
+  role: "user" | "ai";
+  content: string;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("summary");
   const [message, setMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages appear
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isLoading]);
 
   useEffect(() => {
     const runPiecesHealthCheck = async () => {
@@ -111,6 +117,39 @@ export default function App() {
       }
     } catch (error) {
       console.error("[Force Sync] Failed", error);
+    }
+  }
+
+  async function handleSendMessage(query: string) {
+    if (!query.trim() || isLoading) return;
+
+    const userMessage: ChatMessage = {
+      id: Date.now(),
+      role: "user",
+      content: query.trim(),
+    };
+
+    setChatHistory((prev) => [...prev, userMessage]);
+    setMessage("");
+    setIsLoading(true);
+
+    try {
+      const aiResponse = await askSentinelAI(query.trim());
+      const aiMessage: ChatMessage = {
+        id: Date.now() + 1,
+        role: "ai",
+        content: aiResponse,
+      };
+      setChatHistory((prev) => [...prev, aiMessage]);
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: Date.now() + 1,
+        role: "ai",
+        content: `⚠️ Error: ${error instanceof Error ? error.message : "Failed to reach Sentinel AI backend."}`,
+      };
+      setChatHistory((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -176,11 +215,13 @@ export default function App() {
                       {MOCK_TEAM_CONTEXT.map((member) => (
                         <motion.div
                           key={member.id}
+                          onClick={() => setActiveTab(`member-${member.id}`)}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           className={cn(
                             "group relative flex items-start gap-3 rounded-md p-2 hover:bg-muted transition-all cursor-pointer",
-                            member.isLive && "bg-muted/30"
+                            member.isLive && "bg-muted/30",
+                            activeTab === `member-${member.id}` && "bg-primary/5 ring-1 ring-primary/20"
                           )}
                         >
                           <Avatar className="h-8 w-8 border border-border/50">
@@ -577,7 +618,7 @@ export default function App() {
                                          <p className="text-[9px] font-bold uppercase text-muted-foreground tracking-widest leading-none mb-1">Last Signal</p>
                                          <p className="text-[10px] font-mono text-foreground/80">{member.time}</p>
                                        </div>
-                                       <button className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all">
+                                       <button onClick={(e) => { e.stopPropagation(); setActiveTab(`member-${member.id}`); }} className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all">
                                           <Search className="h-3 w-3" />
                                        </button>
                                     </div>
@@ -595,47 +636,50 @@ export default function App() {
                   /* Chat View */
                   <div className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden relative">
                      <ScrollArea className="flex-1 p-6 z-10">
-                       <div className="max-w-3xl mx-auto space-y-8">
+                       <div className="max-w-3xl mx-auto space-y-6">
+                         {chatHistory.length === 0 && !isLoading && (
+                           <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
+                             <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20">
+                               <Terminal className="h-8 w-8 text-primary/60" />
+                             </div>
+                             <div className="space-y-2">
+                               <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-foreground">Sentinel_CLI :: Ready</h3>
+                               <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">
+                                 Ask Sentinel a question about your codebase. It will use your local Pieces context to provide deterministic answers.
+                               </p>
+                             </div>
+                           </div>
+                         )}
                          <AnimatePresence>
-                           {MOCK_MESSAGES.map((msg) => (
+                           {chatHistory.map((msg) => (
                              <motion.div
                                key={msg.id}
                                initial={{ opacity: 0, y: 10 }}
                                animate={{ opacity: 1, y: 0 }}
                                className={cn(
                                  "flex flex-col gap-2",
-                                 msg.isAI ? "items-center" : "items-start"
+                                 msg.role === "ai" ? "items-center" : "items-start"
                                )}
                              >
-                               {msg.isAI ? (
-                                 <div className="w-full relative py-8 px-8 rounded-2xl border border-primary/20 bg-primary/5 shadow-2xl shadow-primary/5 group overflow-hidden">
+                               {msg.role === "ai" ? (
+                                 <div className="w-full relative py-6 px-6 rounded-2xl border border-primary/20 bg-primary/5 shadow-xl shadow-primary/5 group overflow-hidden">
                                    <div className="absolute top-0 right-0 p-4 opacity-10">
                                      <Code2 className="h-16 w-16" />
                                    </div>
-                                   <div className="flex items-center gap-2 mb-4">
+                                   <div className="flex items-center gap-2 mb-3">
                                      <div className="p-1.5 rounded-lg bg-primary/20 border border-primary/30">
                                        <Terminal className="h-4 w-4 text-primary" />
                                      </div>
-                                     <span className="text-xs font-bold tracking-widest uppercase text-primary">Sentinel AI Analysis</span>
-                                     <Badge variant="outline" className="text-[9px] h-4 border-primary/30 text-primary">Proactive</Badge>
+                                     <span className="text-xs font-bold tracking-widest uppercase text-primary">Sentinel AI</span>
                                    </div>
-                                   <p className="text-sm leading-relaxed text-foreground/90 font-medium whitespace-pre-wrap italic">
-                                     "{msg.content}"
+                                   <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                     {msg.content}
                                    </p>
-                                   <div className="mt-6 flex gap-3">
-                                     <button className="text-[10px] px-3 py-1.5 rounded-md bg-primary text-primary-foreground font-bold uppercase tracking-tight hover:opacity-90 transition-opacity flex items-center gap-2">
-                                       <Activity className="h-3 w-3" /> Execute Analysis
-                                     </button>
-                                     <button className="text-[10px] px-3 py-1.5 rounded-md border border-border bg-muted/50 text-muted-foreground font-bold uppercase tracking-tight hover:bg-muted transition-colors">
-                                       Dismiss
-                                     </button>
-                                   </div>
                                  </div>
                                ) : (
                                  <>
                                    <div className="flex items-center gap-2 px-1">
-                                     <span className="text-xs font-bold text-foreground">{msg.sender}</span>
-                                     <span className="text-[10px] text-muted-foreground">{msg.time}</span>
+                                     <span className="text-xs font-bold text-foreground">You</span>
                                    </div>
                                    <div className="relative px-4 py-3 rounded-xl bg-muted/30 border border-border/50 max-w-[85%] group hover:border-border/80 transition-colors">
                                      <p className="text-sm text-foreground/80 leading-relaxed font-sans">
@@ -646,7 +690,27 @@ export default function App() {
                                )}
                              </motion.div>
                            ))}
+
+                           {/* Loading indicator */}
+                           {isLoading && (
+                             <motion.div
+                               key="loading"
+                               initial={{ opacity: 0, y: 10 }}
+                               animate={{ opacity: 1, y: 0 }}
+                               className="flex flex-col gap-2 items-center"
+                             >
+                               <div className="w-full relative py-6 px-6 rounded-2xl border border-primary/20 bg-primary/5 shadow-xl shadow-primary/5 overflow-hidden">
+                                 <div className="flex items-center gap-3">
+                                   <div className="p-1.5 rounded-lg bg-primary/20 border border-primary/30">
+                                     <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                                   </div>
+                                   <span className="text-xs font-bold tracking-widest uppercase text-primary animate-pulse">Sentinel is thinking...</span>
+                                 </div>
+                               </div>
+                             </motion.div>
+                           )}
                          </AnimatePresence>
+                         <div ref={chatEndRef} />
                        </div>
                      </ScrollArea>
 
@@ -654,12 +718,18 @@ export default function App() {
                      <div className="p-4 border-t border-border/50 bg-background/50 backdrop-blur-md z-10">
                        <div className="max-w-3xl mx-auto relative group">
                          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/5 to-primary/0 rounded-xl blur opacity-0 group-focus-within:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-                         <div className="relative flex flex-col p-2 rounded-xl border border-border bg-background focus-within:border-primary/50 transition-all shadow-sm">
+                         <form
+                           onSubmit={(e) => {
+                             e.preventDefault();
+                             void handleSendMessage(message);
+                           }}
+                           className="relative flex flex-col p-2 rounded-xl border border-border bg-background focus-within:border-primary/50 transition-all shadow-sm"
+                         >
                            <div className="flex items-center gap-2 mb-2 px-2">
-                             <button className="text-muted-foreground hover:text-foreground transition-colors">
+                             <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
                                <Paperclip className="h-4 w-4" />
                              </button>
-                             <button className="text-muted-foreground hover:text-foreground transition-colors">
+                             <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
                                <Smile className="h-4 w-4" />
                              </button>
                              <Separator orientation="vertical" className="h-4" />
@@ -669,19 +739,22 @@ export default function App() {
                              <Input
                                value={message}
                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessage(e.target.value)}
-                               placeholder="Type a message or use / to run a command..."
+                               placeholder="Ask Sentinel about your codebase..."
+                               disabled={isLoading}
                                className="border-none bg-transparent focus-visible:ring-0 text-sm h-10 py-0 shadow-none placeholder:text-muted-foreground/50"
                              />
                              <button
+                               type="submit"
+                               disabled={isLoading || message.trim().length === 0}
                                className={cn(
-                                 "p-2 rounded-lg bg-muted text-muted-foreground transition-all flex items-center gap-2",
-                                 message.length > 0 && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+                                 "p-2 rounded-lg bg-muted text-muted-foreground transition-all flex items-center gap-2 disabled:opacity-50",
+                                 message.length > 0 && !isLoading && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
                                )}
                              >
-                               <Send className="h-4 w-4" />
+                               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                              </button>
                            </div>
-                         </div>
+                         </form>
                        </div>
                        <div className="flex justify-center mt-3">
                          <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-mono">
@@ -693,7 +766,11 @@ export default function App() {
                   </div>
                 )}
 
-                {activeTab !== "summary" && activeTab !== "chat" && (
+                {activeTab.startsWith("member-") && (
+                  <MemberProfile member={MOCK_TEAM_CONTEXT.find(m => m.id === parseInt(activeTab.replace("member-", "")))!} />
+                )}
+
+                {activeTab !== "summary" && activeTab !== "chat" && !activeTab.startsWith("member-") && (
                   /* Fallback View for other modules */
                   <div className="flex-1 flex flex-col items-center justify-center p-12 bg-background min-h-0 relative overflow-hidden">
                     <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
