@@ -3,6 +3,8 @@ import cors from 'cors';
 import { generateText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import dotenv from 'dotenv';
+import webhookRouter from './webhookrouter.js';
+
 
 dotenv.config();
 
@@ -16,6 +18,7 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use('/', webhookRouter);
 
 // Type definition for the incoming request
 interface CollaborateRequest {
