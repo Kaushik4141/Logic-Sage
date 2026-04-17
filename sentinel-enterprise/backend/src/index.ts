@@ -15,7 +15,7 @@ const cerebras = createOpenAI({
 });
 
 const app = express();
-const port            = process.env.PORT                     || 3000;
+const port = 3000;
 const PRIMARY_MODEL   = process.env.CEREBRAS_PRIMARY_MODEL   || 'llama3.1-8b';
 const FALLBACK_MODEL  = process.env.CEREBRAS_FALLBACK_MODEL  || 'llama3.1-8b';
 
@@ -35,7 +35,6 @@ app.use(cors({
     }
   },
 }));
-
 app.use(express.json());
 app.use('/', webhookRouter);
 
@@ -110,6 +109,60 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
     res.json({ status: 'success', text: result.text });
   } catch (error) {
     console.error('Error in /api/collaborate:', error);
+    res.status(500).json({ status: 'error', message: 'Internal server error' });
+  }
+});
+
+app.post('/api/developer-brief/:username', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { username } = req.params;
+    const { local_context } = req.body;
+
+    if (!local_context) {
+      res.status(400).json({ status: 'error', message: 'Missing local_context' });
+      return;
+    }
+
+    const edgeApiUrl = process.env.EDGE_API_URL || 'http://127.0.0.1:8787';
+    let historyData = null;
+    try {
+      const historyRes = await fetch(`${edgeApiUrl}/api/history/${username}`);
+      if (historyRes.ok) {
+        historyData = await historyRes.json();
+      } else {
+        console.warn(`[Sentinel] History API returned status ${historyRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[Sentinel] Failed to fetch history from ${edgeApiUrl}:`, err);
+    }
+
+    const prompt = `History:\n${JSON.stringify(historyData, null, 2)}\n\nLocal Context:\n${JSON.stringify(local_context, null, 2)}`;
+    const systemPrompt = 'Given this history and this local desktop context, write a 1-sentence brief of what this dev is doing.';
+
+    let result;
+    try {
+      result = await generateText({
+        model: cerebras.chat(PRIMARY_MODEL),
+        system: systemPrompt,
+        prompt,
+      });
+    } catch (primaryError) {
+      console.warn(`[Sentinel] Primary model (${PRIMARY_MODEL}) failed — attempting fallback.`, primaryError);
+      try {
+        result = await generateText({
+          model: cerebras.chat(FALLBACK_MODEL),
+          system: systemPrompt,
+          prompt,
+        });
+      } catch (fallbackError) {
+        console.error(`[Sentinel] Fallback model (${FALLBACK_MODEL}) also failed.`, { primaryError, fallbackError });
+        throw fallbackError;
+      }
+    }
+
+    res.json({ status: 'success', brief: result.text });
+  } catch (error) {
+    console.error('Error in /api/developer-brief:', error);
     res.status(500).json({ status: 'error', message: 'Internal server error' });
   }
 });
