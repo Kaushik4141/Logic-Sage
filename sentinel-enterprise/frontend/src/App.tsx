@@ -38,11 +38,12 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
+import { MemberProfile } from "@/components/MemberProfile";
 
 const MOCK_TEAM_CONTEXT = [
-  { id: 1, name: "David (Backend)", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png" },
-  { id: 2, name: "Sarah (Frontend)", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png" },
-  { id: 3, name: "Alex (DevOps)", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png" }
+  { id: 1, name: "David", role: "Backend Engineer", department: "Architecture", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png", branch: "feature/auth-refactor", uptime: "04:12:33", tasks: ["Implement OAuth2 providers", "Secure session tokens", "DB migration scripts"] },
+  { id: 2, name: "Sarah", role: "Frontend Lead", department: "Interface", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png", branch: "mainline/core-sync", uptime: "02:45:10", tasks: ["Button interaction states", "Review PR #412", "Update design tokens"] },
+  { id: 3, name: "Alex", role: "DevOps Engineer", department: "Platform Ops", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png", branch: "infra/k8s-cluster", uptime: "12:00:00", tasks: ["Deploy staging servers", "Rotate CI/CD secrets", "Monitor cluster health"] }
 ];
 
 interface ChatMessage {
@@ -214,11 +215,13 @@ export default function App() {
                       {MOCK_TEAM_CONTEXT.map((member) => (
                         <motion.div
                           key={member.id}
+                          onClick={() => setActiveTab(`member-${member.id}`)}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           className={cn(
                             "group relative flex items-start gap-3 rounded-md p-2 hover:bg-muted transition-all cursor-pointer",
-                            member.isLive && "bg-muted/30"
+                            member.isLive && "bg-muted/30",
+                            activeTab === `member-${member.id}` && "bg-primary/5 ring-1 ring-primary/20"
                           )}
                         >
                           <Avatar className="h-8 w-8 border border-border/50">
@@ -615,7 +618,7 @@ export default function App() {
                                          <p className="text-[9px] font-bold uppercase text-muted-foreground tracking-widest leading-none mb-1">Last Signal</p>
                                          <p className="text-[10px] font-mono text-foreground/80">{member.time}</p>
                                        </div>
-                                       <button className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all">
+                                       <button onClick={(e) => { e.stopPropagation(); setActiveTab(`member-${member.id}`); }} className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all">
                                           <Search className="h-3 w-3" />
                                        </button>
                                     </div>
@@ -763,7 +766,11 @@ export default function App() {
                   </div>
                 )}
 
-                {activeTab !== "summary" && activeTab !== "chat" && (
+                {activeTab.startsWith("member-") && (
+                  <MemberProfile member={MOCK_TEAM_CONTEXT.find(m => m.id === parseInt(activeTab.replace("member-", "")))!} />
+                )}
+
+                {activeTab !== "summary" && activeTab !== "chat" && !activeTab.startsWith("member-") && (
                   /* Fallback View for other modules */
                   <div className="flex-1 flex flex-col items-center justify-center p-12 bg-background min-h-0 relative overflow-hidden">
                     <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
