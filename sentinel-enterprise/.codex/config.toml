@@ -10,9 +10,7 @@ You are assisting in building "Sentinel Enterprise," an asynchronous context rou
   - *Rule:* Pieces OS handles all OCR and heavy ML locally. Do not write custom screen-scraping logic. Rely on the SDK.
 - **Backend / AI Orchestrator:** Node.js, Express, Vercel AI SDK (`ai`).
   - *Rule:* The backend acts as a secure router, NOT a long-term code storage facility.
-- **Databases:** SQLite (Local/Tauri via `tauri-plugin-sql`, DB file: `sentinel-local.db`) and Cloudflare D1 (Serverless Edge SQLite via Cloudflare Worker).
-  - *Rule:* Local SQLite is the source of truth for raw telemetry, AI chat history, and immediate context cache for offline speed.
-  - *Rule:* Cloud D1 is only for syncing Developer Blueprints and telemetry metadata to the enterprise dashboard.
+- **Databases:** SQLite (Local/Tauri) and PostgreSQL (Cloud/Analytics via Supabase/Neon).
 
 ## 3. Strict Security Rules (Zero-Trust)
 - NEVER log unredacted code to the console.

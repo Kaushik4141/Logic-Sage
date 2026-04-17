@@ -1,15 +1,42 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  checkPiecesConnection,
+  getRecentCodeSnippets,
+  packageLocalContext,
+} from "./lib/pieces";
 import "./App.css";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
   const [name, setName] = useState("");
 
+  useEffect(() => {
+    const runPiecesHealthCheck = async () => {
+      const status = await checkPiecesConnection();
+      console.info("[Pieces OS] Connection status:", status);
+    };
+
+    void runPiecesHealthCheck();
+  }, []);
+
   async function greet() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     setGreetMsg(await invoke("greet", { name }));
+  }
+
+  async function handleTestSnippets() {
+    const snippets = await getRecentCodeSnippets();
+    console.info("[Pieces OS] Recent code snippets:", snippets);
+  }
+
+  async function handleTestPayload() {
+    const payload = await packageLocalContext(
+      "Why is my API failing?",
+      "feature/auth-update",
+    );
+    console.log(JSON.stringify(payload, null, 2));
   }
 
   return (
@@ -41,7 +68,14 @@ function App() {
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Enter a name..."
         />
+       
         <button type="submit">Greet</button>
+        <button type="button" onClick={handleTestSnippets}>
+          Test Snippets
+        </button>
+        <button type="button" onClick={handleTestPayload}>
+          Test Payload
+        </button>
       </form>
       <p>{greetMsg}</p>
     </main>

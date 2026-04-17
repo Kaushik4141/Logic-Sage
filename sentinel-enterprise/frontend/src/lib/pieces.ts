@@ -1,0 +1,267 @@
+import {
+  AssetsApi,
+  type Asset,
+  Configuration,
+  WellKnownApi,
+  WorkstreamSummariesApi,
+  type WorkstreamSummary,
+} from "@pieces.app/pieces-os-client";
+
+const PIECES_OS_BASE_URL = "http://localhost:39300";
+
+export type PiecesConnectionStatus = {
+  connected: boolean;
+  baseUrl: string;
+  health?: string;
+  error?: string;
+};
+
+export type CollaboratePayload = {
+  user_query: string;
+  local_context: {
+    error_log: string;
+    teammate_recent_code: string;
+  };
+  branch: string;
+};
+
+export async function checkPiecesConnection(): Promise<PiecesConnectionStatus> {
+  const api = new WellKnownApi(
+    new Configuration({
+      basePath: PIECES_OS_BASE_URL,
+    }),
+  );
+
+  try {
+    const health = await api.getWellKnownHealth();
+
+    return {
+      connected: true,
+      baseUrl: PIECES_OS_BASE_URL,
+      health,
+    };
+  } catch (error) {
+    return {
+      connected: false,
+      baseUrl: PIECES_OS_BASE_URL,
+      error: error instanceof Error ? error.message : "Unknown Pieces OS connection error",
+    };
+  }
+}
+
+function createPiecesConfig(): Configuration {
+  return new Configuration({
+    basePath: PIECES_OS_BASE_URL,
+  });
+}
+
+function toMillis(value: unknown): number {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
+}
+
+function getAssetRecency(asset: Asset): number {
+  const interacted = toMillis(asset.interacted?.value);
+  const updated = toMillis(asset.updated?.value);
+  const created = toMillis(asset.created?.value);
+  return Math.max(interacted, updated, created);
+}
+
+function isCodeAsset(asset: Asset): boolean {
+  return (asset.formats?.iterable ?? []).some(
+    (format) => format.classification?.generic === "CODE",
+  );
+}
+
+function extractRawTextFromAsset(asset: Asset): string | null {
+  const formats = asset.formats?.iterable ?? [];
+
+  for (const format of formats) {
+    const raw =
+      format.fragment?.string?.raw ??
+      format.file?.string?.raw;
+
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractSummaryText(summary: WorkstreamSummary | undefined): string | null {
+  if (!summary) {
+    return null;
+  }
+
+  const annotationText =
+    summary.annotations?.iterable
+      ?.map((annotation) => annotation.reference?.text?.trim())
+      .filter((text): text is string => Boolean(text)) ?? [];
+
+  if (annotationText.length > 0) {
+    return annotationText.join("\n\n");
+  }
+
+  const name = summary.name?.trim();
+  return name && name.length > 0 ? name : null;
+}
+
+function condenseText(text: string | null | undefined, maxLength = 2_000): string {
+  if (!text) {
+    return "";
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+export async function getRecentCodeSnippets(limit = 5): Promise<string[]> {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 5;
+  const assetsApi = new AssetsApi(createPiecesConfig());
+
+  try {
+    const assets = await assetsApi.assetsSnapshot({ transferables: true });
+    const iterable = assets?.iterable ?? [];
+
+    if (iterable.length === 0) {
+      return [];
+    }
+
+    const codeAssets = iterable.filter(isCodeAsset);
+    const primary = codeAssets.filter((asset) => asset.mechanism === "MANUAL");
+    const prioritized = (primary.length > 0 ? primary : codeAssets).sort(
+      (a, b) => getAssetRecency(b) - getAssetRecency(a),
+    );
+
+    const snippets: string[] = [];
+    const seen = new Set<string>();
+
+    for (const asset of prioritized) {
+      const snippet = extractRawTextFromAsset(asset);
+      if (!snippet || seen.has(snippet)) {
+        continue;
+      }
+
+      seen.add(snippet);
+      snippets.push(snippet);
+
+      if (snippets.length >= safeLimit) {
+        break;
+      }
+    }
+
+    if (snippets.length < safeLimit && prioritized !== codeAssets) {
+      const fallback = codeAssets
+        .slice()
+        .sort((a, b) => getAssetRecency(b) - getAssetRecency(a));
+
+      for (const asset of fallback) {
+        const snippet = extractRawTextFromAsset(asset);
+        if (!snippet || seen.has(snippet)) {
+          continue;
+        }
+
+        seen.add(snippet);
+        snippets.push(snippet);
+
+        if (snippets.length >= safeLimit) {
+          break;
+        }
+      }
+    }
+
+    return snippets;
+  } catch {
+    return [];
+  }
+}
+
+export async function getRecentWorkflowSummary(): Promise<string | null> {
+  const api = new WorkstreamSummariesApi(createPiecesConfig());
+  const to = new Date();
+  const from = new Date(to.getTime() - 2 * 60 * 60 * 1000);
+  const cutoff = from.getTime();
+
+  try {
+    const generated = await api.workstreamSummariesCreateAutogeneratedWorkstreamSummary({
+      autoGeneratedWorkstreamSummaryInput: {
+        anonymousRanges: [
+          {
+            from: { value: from },
+            to: { value: to },
+            between: true,
+          },
+        ],
+      },
+    });
+
+    const generatedText = extractSummaryText(generated);
+    if (generatedText) {
+      return generatedText;
+    }
+  } catch {
+    // Fallback to snapshot below.
+  }
+
+  try {
+    const snapshot = await api.workstreamSummariesSnapshot({ transferables: true });
+    const summaries = snapshot?.iterable ?? [];
+
+    if (summaries.length === 0) {
+      return null;
+    }
+
+    const recentSummary = summaries
+      .slice()
+      .sort((a, b) => toMillis(b.updated?.value) - toMillis(a.updated?.value))
+      .find((summary) => {
+        const updated = toMillis(summary.updated?.value);
+        const created = toMillis(summary.created?.value);
+        return Math.max(updated, created) >= cutoff;
+      });
+
+    return extractSummaryText(recentSummary);
+  } catch {
+    return null;
+  }
+}
+
+export async function packageLocalContext(
+  userQuery: string,
+  branchName: string,
+): Promise<CollaboratePayload> {
+  const [snippets, workflowSummary] = await Promise.all([
+    getRecentCodeSnippets(),
+    getRecentWorkflowSummary(),
+  ]);
+
+  const condensedSnippets = snippets
+    .map((snippet) => condenseText(snippet, 3_000))
+    .filter((snippet) => snippet.length > 0);
+
+  return {
+    user_query: condenseText(userQuery, 500),
+    local_context: {
+      error_log: condenseText(workflowSummary, 1_500) || "No recent workflow summary available.",
+      teammate_recent_code:
+        condensedSnippets[0] ?? "No recent code snippet available from Pieces OS.",
+    },
+    branch: condenseText(branchName, 200),
+  };
+}
