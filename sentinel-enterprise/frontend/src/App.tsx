@@ -6,6 +6,8 @@ import {
   getRecentCodeSnippets,
   packageLocalContext,
 } from "./lib/pieces";
+import { runLocalCapture } from "./lib/captureLoop";
+import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
 import "./App.css";
 
 function App() {
@@ -19,6 +21,24 @@ function App() {
     };
 
     void runPiecesHealthCheck();
+  }, []);
+
+  useEffect(() => {
+    const runCapture = async () => {
+      try {
+        await runLocalCapture();
+        console.info("[Capture Loop] Local capture written to sentinel-local.db");
+      } catch (error) {
+        console.error("[Capture Loop] Failed to run local capture", error);
+      }
+    };
+
+    void runCapture();
+    const intervalId = window.setInterval(() => {
+      void runCapture();
+    }, 5 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   async function greet() {
@@ -37,6 +57,35 @@ function App() {
       "feature/auth-update",
     );
     console.log(JSON.stringify(payload, null, 2));
+  }
+
+  async function handleForceSync() {
+    console.info("[Force Sync] Button clicked");
+    try {
+      await runLocalCapture();
+
+      // Raw Tauri SQL fallback — bypasses Drizzle entirely
+      const tauriDb = await getTauriDb();
+      const rawResult = await tauriDb.select<Record<string, unknown>[]>(
+        "SELECT * FROM local_telemetry ORDER BY id DESC LIMIT 1",
+      );
+      console.info("[Raw Tauri SQL] Latest telemetry:", rawResult);
+
+      // Drizzle path
+      const latestTelemetry = await getLatestTelemetry();
+
+      if (latestTelemetry?.codeSnippets) {
+        const parsed = JSON.parse(latestTelemetry.codeSnippets) as string[];
+        console.info("[Drizzle DB] Latest telemetry:", {
+          ...latestTelemetry,
+          codeSnippets: parsed,
+        });
+      } else {
+        console.info("[Drizzle DB] Latest telemetry:", latestTelemetry);
+      }
+    } catch (error) {
+      console.error("[Force Sync] Failed", error);
+    }
   }
 
   return (
@@ -75,6 +124,9 @@ function App() {
         </button>
         <button type="button" onClick={handleTestPayload}>
           Test Payload
+        </button>
+        <button type="button" onClick={handleForceSync}>
+          Force Sync
         </button>
       </form>
       <p>{greetMsg}</p>
