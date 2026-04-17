@@ -15,7 +15,6 @@ import {
   MessageSquare,
   Settings,
   Search,
-  Circle,
   Code2,
   Terminal,
   Activity,
@@ -41,7 +40,6 @@ const MOCK_MESSAGES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("chat");
   const [message, setMessage] = useState("");
 
   return (
@@ -72,10 +70,8 @@ export default function App() {
             </div>
             <div className="flex items-center space-x-3">
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <button className="text-muted-foreground hover:text-foreground transition-colors">
-                    <Activity className="h-4 w-4" />
-                  </button>
+                <TooltipTrigger render={<button className="text-muted-foreground hover:text-foreground transition-colors" />}>
+                  <Activity className="h-4 w-4" />
                 </TooltipTrigger>
                 <TooltipContent side="bottom">System Health</TooltipContent>
               </Tooltip>
@@ -287,7 +283,7 @@ export default function App() {
                       <div className="flex gap-2">
                         <Input
                           value={message}
-                          onChange={(e) => setMessage(e.target.value)}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessage(e.target.value)}
                           placeholder="Type a message or use / to run a command..."
                           className="border-none bg-transparent focus-visible:ring-0 text-sm h-10 py-0 shadow-none placeholder:text-muted-foreground/50"
                         />
