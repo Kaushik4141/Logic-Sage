@@ -134,6 +134,61 @@ export async function askSentinelWithContext(
   return { text: data.text ?? "", references: data.references ?? [] };
 }
 
+// --- Manifest API (Dynamic Overview + Task Statuses) ---
+
+const EDGE_API_URL = "https://edge-api.kaushik0h0s.workers.dev";
+
+export interface ManifestTask {
+  id: number;
+  ticket_id: string;
+  assignee_email: string;
+  title: string | null;
+  status: "not_started" | "working" | "done";
+  branch_pattern: string | null;
+  source: string;
+  updated_at: string;
+}
+
+export interface ManifestResponse {
+  aiGeneratedOverview: string;
+  activeTasks: ManifestTask[];
+  generatedAt: string | null;
+}
+
+/**
+ * Fetches the dynamic project manifest from the Cloudflare Worker.
+ * Returns the AI-generated 01_Overview text and all active task statuses.
+ */
+export async function fetchManifest(): Promise<ManifestResponse> {
+  try {
+    const response = await fetch(`${EDGE_API_URL}/api/manifest`);
+    if (!response.ok) {
+      throw new Error(`Manifest API returned ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      status: string;
+      aiGeneratedOverview: string;
+      activeTasks: ManifestTask[];
+      generatedAt: string | null;
+    };
+
+    return {
+      aiGeneratedOverview: data.aiGeneratedOverview,
+      activeTasks: data.activeTasks ?? [],
+      generatedAt: data.generatedAt,
+    };
+  } catch (error) {
+    console.error("[fetchManifest] Failed:", error);
+    return {
+      aiGeneratedOverview:
+        "Sentinel Enterprise is a high-availability orchestration layer designed specifically for decentralized development teams. It serves as the primary Truth Engine for synchronizing complex application states across distributed environments.",
+      activeTasks: [],
+      generatedAt: null,
+    };
+  }
+}
+
 export async function getDeveloperBrief(
   username: string,
   localContext: MemberLocalContext,

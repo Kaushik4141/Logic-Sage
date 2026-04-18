@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
-import { askSentinelAI, type RagReference } from "./lib/api";
+import { askSentinelAI, fetchManifest, type RagReference, type ManifestTask } from "./lib/api";
 import { syncTelemetryToCloud } from "./lib/cloudSync";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -127,6 +127,11 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
 
+  // --- Dynamic Manifest State ---
+  const [overview, setOverview] = useState("Loading dynamic manifest...");
+  const [teamTasks, setTeamTasks] = useState<ManifestTask[]>([]);
+  const [manifestGenerated, setManifestGenerated] = useState<string | null>(null);
+
   function scrollChatToBottom() {
     const viewport = chatScrollRef.current;
     if (!viewport) return;
@@ -197,6 +202,31 @@ export default function App() {
     };
     window.addEventListener('cloud-sync-success', handleSyncSuccess);
     return () => window.removeEventListener('cloud-sync-success', handleSyncSuccess);
+  }, []);
+
+  // --- Fetch Dynamic Manifest from Edge API ---
+  useEffect(() => {
+    let mounted = true;
+    async function loadManifest() {
+      try {
+        const manifest = await fetchManifest();
+        if (mounted) {
+          setOverview(manifest.aiGeneratedOverview);
+          setTeamTasks(manifest.activeTasks);
+          setManifestGenerated(manifest.generatedAt);
+          console.info("[Manifest] Loaded dynamic overview + tasks", {
+            tasksCount: manifest.activeTasks.length,
+            generatedAt: manifest.generatedAt,
+          });
+        }
+      } catch (err) {
+        console.error("[Manifest] Failed to fetch:", err);
+      }
+    }
+    void loadManifest();
+    // Refresh every 2 minutes
+    const interval = setInterval(() => void loadManifest(), 2 * 60 * 1000);
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
 
 
@@ -462,9 +492,18 @@ export default function App() {
                         <div className="space-y-4">
                           <h4 className="text-xs font-bold uppercase text-foreground/80 tracking-widest border-b border-border pb-2 font-mono">01_Overview</h4>
                           <div className="text-[13px] text-muted-foreground leading-relaxed font-sans space-y-3">
-                            <p>Sentinel Enterprise is a high-availability orchestration layer designed specifically for decentralized development teams. It serves as the primary "Truth Engine" for synchronizing complex application states across distributed environments.</p>
-                            <p>The platform implements a proprietary <strong>Synapse Proxy</strong> logic that mitigates race conditions in real-time collaboration, ensuring that every node in the cluster has a cryptographically verified view of the project state at any given timestamp.</p>
+                            {overview.split('\n\n').map((para, i) => (
+                              <p key={i}>{para}</p>
+                            ))}
                           </div>
+                          {manifestGenerated && (
+                            <div className="flex items-center gap-2 pt-1">
+                              <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                              <span className="text-[9px] font-mono text-muted-foreground/60 uppercase tracking-widest">
+                                AI-Generated · {new Date(manifestGenerated).toLocaleDateString()}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-4">
                           <h4 className="text-xs font-bold uppercase text-foreground/80 tracking-widest border-b border-border pb-2 font-mono">02_System_Objectives</h4>
@@ -594,51 +633,86 @@ export default function App() {
                       </div>
                     </section>
 
-                    {/* 03: THINGS DONE (MILESTONES / CHANGELOG) */}
+                    {/* 03: LIVE TASK TRACKER (Dynamic from D1) */}
                     <section className="space-y-6">
                       <div className="flex items-center gap-3">
                         <div className="h-px flex-1 bg-border" />
                         <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground flex items-center gap-2 shrink-0">
                           <FileCode className="h-3 w-3" />
-                          Mission Progress & Completed Milestones
+                          Mission Progress & Active Tasks
                         </h3>
                         <div className="h-px flex-1 bg-border" />
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {[
-                          {
-                            title: "Core Architecture",
-                            status: "Verified",
-                            tasks: ["Orchestration Engine", "Synapse Proxy v1", "Identity Provider"]
-                          },
-                          {
-                            title: "Interface Layer",
-                            status: "Authenticated",
-                            tasks: ["Mission Control UI", "Live State Sink", "Contextual Sidebar"]
-                          },
-                          {
-                            title: "Security Matrix",
-                            status: "Enforced",
-                            tasks: ["AES-256 Anchorage", "Tier-III Verification", "Audit Logging"]
-                          }
-                        ].map((milestone, i) => (
-                          <div key={i} className="p-5 rounded-lg border border-border bg-background space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{milestone.title}</h4>
-                              <Badge variant="outline" className="text-[8px] h-4 bg-primary/5 text-primary border-primary/20">{milestone.status}</Badge>
+                      {teamTasks.length > 0 ? (
+                        <div className="space-y-[1px] bg-border border border-border rounded-lg overflow-hidden">
+                          {teamTasks.map((task) => (
+                            <div key={task.id} className="bg-background p-4 flex items-center gap-4 hover:bg-muted/10 transition-colors">
+                              <div className={cn(
+                                "h-2.5 w-2.5 rounded-full shrink-0",
+                                task.status === 'done' ? 'bg-green-500' :
+                                task.status === 'working' ? 'bg-amber-400 animate-pulse' :
+                                'bg-muted-foreground/30'
+                              )} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono font-bold text-primary uppercase">{task.ticket_id}</span>
+                                  <span className="text-xs text-foreground truncate">{task.title || 'Untitled Task'}</span>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">
+                                  {task.assignee_email} · {task.source.toUpperCase()}
+                                </p>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[8px] h-5 font-bold uppercase tracking-wider shrink-0",
+                                  task.status === 'done' ? 'bg-green-500/10 text-green-400 border-green-500/30' :
+                                  task.status === 'working' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                                  'bg-muted/30 text-muted-foreground border-border'
+                                )}
+                              >
+                                {task.status === 'done' ? 'Done' : task.status === 'working' ? 'Working' : 'Not Started'}
+                              </Badge>
                             </div>
-                            <ul className="space-y-2">
-                              {milestone.tasks.map((task, j) => (
-                                <li key={j} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                  <div className="h-1 w-1 rounded-full bg-green-500" />
-                                  {task}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {[
+                            {
+                              title: "Core Architecture",
+                              status: "Verified",
+                              tasks: ["Orchestration Engine", "Synapse Proxy v1", "Identity Provider"]
+                            },
+                            {
+                              title: "Interface Layer",
+                              status: "Authenticated",
+                              tasks: ["Mission Control UI", "Live State Sink", "Contextual Sidebar"]
+                            },
+                            {
+                              title: "Security Matrix",
+                              status: "Enforced",
+                              tasks: ["AES-256 Anchorage", "Tier-III Verification", "Audit Logging"]
+                            }
+                          ].map((milestone, i) => (
+                            <div key={i} className="p-5 rounded-lg border border-border bg-background space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">{milestone.title}</h4>
+                                <Badge variant="outline" className="text-[8px] h-4 bg-primary/5 text-primary border-primary/20">{milestone.status}</Badge>
+                              </div>
+                              <ul className="space-y-2">
+                                {milestone.tasks.map((task, j) => (
+                                  <li key={j} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                    <div className="h-1 w-1 rounded-full bg-green-500" />
+                                    {task}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </section>
 
                     {/* 04: PEOPLE: LIVE CONTEXT MONITORING */}
