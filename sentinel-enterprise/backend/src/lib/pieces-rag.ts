@@ -100,6 +100,38 @@ function normalizeReferenceText(rawText: string | null | undefined): string {
     .trim();
 }
 
+function isGenericReferenceLabel(rawText: string | null | undefined): boolean {
+  if (!rawText) return true;
+
+  const normalized = normalizeReferenceText(rawText).toLowerCase();
+  return [
+    "os_server",
+    "os server",
+    "workstream",
+    "reference",
+    "pieces",
+    "pieces context",
+    "chunk",
+    "server",
+  ].includes(normalized);
+}
+
+function deriveReferenceTitle(title: string, snippet: string): string {
+  if (!isGenericReferenceLabel(title)) {
+    return normalizeReferenceText(title);
+  }
+
+  const snippetMatch = snippet.match(
+    /\b(JWT|OAuth2?|Bearer token|access token|refresh token|session state|session token|AES-256|RBAC|PostgreSQL|WebSocket|REST API|API Gateway|authentication|authorization)\b/i
+  );
+
+  if (snippetMatch) {
+    return normalizeReferenceText(snippetMatch[0]);
+  }
+
+  return "Technology Context";
+}
+
 function extractCitedReferenceIds(answer: string): number[] {
   const ids = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
   return ids.filter((id, index) => Number.isFinite(id) && ids.indexOf(id) === index);
@@ -168,12 +200,13 @@ ${JSON.stringify(
         return reference;
       }
 
-      const cleanedTechnology = normalizeReferenceText(enrichment.technology) || reference.title;
+      const cleanedTechnology = normalizeReferenceText(enrichment.technology) || deriveReferenceTitle(reference.title, reference.snippet);
       const cleanedDetails = normalizeReferenceText(enrichment.details) || reference.snippet;
       const imageSlug = slugifyTechnologyName(enrichment.imageSlug || cleanedTechnology);
 
       return {
         ...reference,
+        title: deriveReferenceTitle(reference.title, reference.snippet),
         technology: cleanedTechnology,
         details: cleanedDetails,
         ...(imageSlug ? { imageUrl: `https://cdn.simpleicons.org/${imageSlug}` } : {}),
@@ -458,7 +491,14 @@ export class PiecesRAG {
 
     const references: RagReference[] = chunks.map((c, index) => ({
       id: index + 1,
-      title: normalizeReferenceText(scrubSensitiveText(String(c.metadata["title"] ?? "Reference"))),
+      title: deriveReferenceTitle(
+        normalizeReferenceText(scrubSensitiveText(String(c.metadata["title"] ?? "Reference"))),
+        normalizeReferenceText(
+          scrubSensitiveText(
+            c.content.substring(0, 220) + (c.content.length > 220 ? "..." : "")
+          )
+        )
+      ),
       timestamp: String(c.metadata["timestamp"] ?? "unknown"),
       snippet: normalizeReferenceText(
         scrubSensitiveText(
