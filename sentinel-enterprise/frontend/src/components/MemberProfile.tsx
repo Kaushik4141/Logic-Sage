@@ -7,7 +7,6 @@ import {
   Clock,
   Code2,
   Edit2,
-  FileText,
   GitBranch,
   Layers3,
   Loader2,

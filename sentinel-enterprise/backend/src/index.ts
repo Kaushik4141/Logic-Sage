@@ -540,21 +540,16 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
     const systemPrompt =
       'Given this history and local desktop context, write a concise 2-sentence developer brief. Plain text only. No markdown, headings, labels, or bullet points. Focus on current work, technical direction, and any blocking issue if clearly present.';
 
-    let result;
+    let briefText: string;
     try {
-      result = await generateTextSafe({
-        system: systemPrompt,
-        prompt,
-      });
+      const result = await generateTextSafe({ system: systemPrompt, prompt });
+      briefText = result.text;
     } catch (modelError) {
       console.error(`[Sentinel] All AI models failed for developer brief.`, modelError);
-      result = {
-        text: buildDeveloperBriefFallback(username, local_context as Record<string, unknown>, historyData),
-      };
+      briefText = buildDeveloperBriefFallback(username, local_context as Record<string, unknown>, historyData);
     }
 
-
-    res.json({ status: 'success', brief: sanitizeBriefText(result.text) });
+    res.json({ status: 'success', brief: sanitizeBriefText(briefText) });
   } catch (error) {
     console.error('Error in /api/developer-brief:', error);
     const username = normalizeRouteParam(req.params.username, 'This developer');
@@ -684,7 +679,7 @@ Do not include any other text, markdown blocks, or labels.`;
 
     const prompt = `Branch: ${branch_name}\nTelemetry:\n${scrubbedTelemetry}`;
 
-    const { text } = await generateTextSafe({
+    const { text = '' } = await generateTextSafe({
       system: systemPrompt,
       prompt,
     });
@@ -697,7 +692,7 @@ Do not include any other text, markdown blocks, or labels.`;
     } catch (parseError) {
       console.warn('[Sentinel] Failed to parse AI JSON output, using fallback formatting.', parseError);
       blueprint = {
-        summary: text.split('\n')[0].substring(0, 150),
+        summary: (text.split('\n')[0] ?? '').substring(0, 150),
         key_context: ["Context Extraction Failed"]
       };
     }
