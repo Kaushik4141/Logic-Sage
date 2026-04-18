@@ -1,27 +1,22 @@
-import React from "react";
-import { 
-  Users, 
-  Settings, 
-  Shield, 
-  Terminal, 
-  Signal, 
-  LayoutGrid, 
-  Library, 
-  FileCode, 
-  Layers, 
-  Code2, 
-  PanelLeft, 
-  Rabbit,
-  ChevronLeft,
-  ChevronRight
+import {
+  Users,
+  LayoutGrid,
+  PanelLeft,
+  ChevronLeft
 } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { cn } from "../lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const MOCK_TEAM_CONTEXT = [
-  { id: 1, name: "David", role: "Backend Engineer", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png" },
-  { id: 2, name: "Sarah", role: "Frontend Lead", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png" },
-  { id: 3, name: "Alex", role: "DevOps Engineer", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png" }
+  { id: 1, name: "David", role: "Backend Engineer", isLive: true, avatar: "https://github.com/shadcn.png" },
+  { id: 2, name: "Sarah", role: "Frontend Lead", isLive: false, avatar: "https://github.com/leerob.png" },
+  { id: 3, name: "Alex", role: "DevOps Engineer", isLive: false, avatar: "https://github.com/evilrabbit.png" }
 ];
 
 interface SidebarProps {
@@ -38,43 +33,66 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
       isCollapsed ? "w-[65px]" : "w-[260px]"
     )}>
       {isCollapsed ? (
-        <div className="flex flex-col items-center py-6 px-2 h-full gap-6 bg-[#0c0c0c] overflow-y-auto no-scrollbar scrollbar-hide">
-          <div 
-            className="w-full px-1.5 shrink-0 cursor-pointer hover:scale-105 transition-transform flex items-center justify-center" 
-            onClick={onToggle}
-          >
-            <img src="/logo 1.png" alt="Sentinel Logo" className="w-full h-10 object-contain" />
-          </div>
-          
-          <div className="flex flex-col gap-4 items-center">
-            {MOCK_TEAM_CONTEXT.map((member) => (
-              <div key={member.id} className="relative cursor-pointer hover:opacity-80 transition-opacity">
-                <img 
-                  src={member.avatar} 
-                  className="h-10 w-10 rounded-full border border-zinc-800 bg-black object-cover" 
-                  referrerPolicy="no-referrer"
-                  alt={member.name}
-                />
-                {member.isLive && (
-                  <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-[#0c0c0c]" />
-                )}
-              </div>
-            ))}
-          </div>
+        <TooltipProvider delayDuration={0}>
+          <div className="flex flex-col items-center py-6 px-2 h-full gap-6 bg-[#0c0c0c] overflow-y-auto no-scrollbar scrollbar-hide">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className="w-full px-1.5 shrink-0 cursor-pointer hover:scale-105 transition-transform flex items-center justify-center"
+                  onClick={onToggle}
+                >
+                  <img src="/logo 1.png" alt="Sentinel Logo" className="w-full h-10 object-contain" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right">Expand Sidebar</TooltipContent>
+            </Tooltip>
 
-          <div className="mt-auto pt-4 flex flex-col gap-5 items-center w-full pb-4">
-            <div className="h-10 w-10 rounded-xl bg-black border border-zinc-800 flex items-center justify-center shrink-0 cursor-pointer shadow-md hover:border-zinc-700 transition-colors">
-              <Rabbit className="h-5 w-5 text-white" />
+            <div className="flex flex-col gap-4 items-center">
+              {MOCK_TEAM_CONTEXT.map((member) => (
+                <Tooltip key={member.id}>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="relative cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => onTabChange(`member-${member.id}`)}
+                    >
+                      <img
+                        src={member.avatar}
+                        className="h-10 w-10 rounded-full border border-zinc-800 bg-black object-cover"
+                        referrerPolicy="no-referrer"
+                        alt={member.name}
+                      />
+                      {member.isLive && (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-[#0c0c0c]" />
+                      )}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <div className="space-y-1">
+                      <p className="font-bold text-xs">{member.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{member.role}</p>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              ))}
             </div>
-            
-            <button 
-              onClick={onToggle}
-              className="h-10 w-10 rounded-xl bg-[#1e1e1e] flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all shadow-sm"
-            >
-              <PanelLeft className="h-5 w-5" />
-            </button>
+
+            <div className="mt-auto pt-4 flex flex-col gap-5 items-center w-full pb-4">
+              
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onToggle}
+                    className="h-10 w-10 rounded-xl bg-[#1e1e1e] flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all shadow-sm"
+                  >
+                    <PanelLeft className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Toggle Sidebar</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-        </div>
+        </TooltipProvider>
       ) : (
         <div className="p-4 flex flex-col h-full min-h-0 bg-background">
           <div className="flex items-center justify-between mb-6 shrink-0 gap-4">
@@ -82,22 +100,22 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
               <img src="/logo.png" alt="Sentinel Logo" className="w-full h-10 object-contain object-left" />
             </div>
             <div className="flex items-center shrink-0">
-              <button 
-                onClick={onToggle} 
+              <button
+                onClick={onToggle}
                 className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
             </div>
           </div>
-          
+
           <div className="flex items-center justify-between mb-4 shrink-0">
             <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground flex items-center gap-2">
               <Users className="h-3.5 w-3.5" />
               Live Context
             </h2>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto no-scrollbar scrollbar-hide -mx-2 px-2 space-y-6">
             <div className="space-y-1">
               {MOCK_TEAM_CONTEXT.map((member) => (
@@ -112,9 +130,9 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                   )}
                 >
                   <div className="relative shrink-0">
-                    <img 
-                      src={member.avatar} 
-                      className="h-9 w-9 rounded-full border border-border/50 object-cover" 
+                    <img
+                      src={member.avatar}
+                      className="h-9 w-9 rounded-full border border-border/50 object-cover"
                       referrerPolicy="no-referrer"
                       alt={member.name}
                     />
@@ -125,19 +143,10 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
                       <p className="text-xs font-semibold truncate text-foreground">{member.name}</p>
-                      <span className="text-[9px] font-medium text-muted-foreground/60">{member.time}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className={cn(
-                        "text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter",
-                        member.status === "Editing" ? "bg-blue-500/10 text-blue-400" :
-                        member.status === "Viewing" ? "bg-green-500/10 text-green-400" :
-                        "bg-muted/80 text-muted-foreground"
-                      )}>
-                        {member.status}
-                      </span>
-                      <p className="text-[10px] text-muted-foreground truncate font-mono opacity-70">
-                        {member.file}
+                      <p className="text-[10px] text-muted-foreground truncate font-sans opacity-70">
+                        {member.role}
                       </p>
                     </div>
                   </div>
@@ -151,25 +160,25 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
               <div className="space-y-2">
                 <h3 className="text-[9px] font-bold uppercase tracking-[0.25em] text-muted-foreground/50 mb-3 ml-1">Terminal</h3>
                 <nav className="space-y-1">
-                  <button 
-                    onClick={() => onTabChange("manifest")}
+                  <button
+                    onClick={() => onTabChange("summary")}
                     className={cn(
                       "w-full flex items-center gap-3 px-3 py-2 text-xs rounded-lg transition-all group",
-                      activeTab === "manifest" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      activeTab === "summary" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
                     <LayoutGrid className="h-4 w-4 shrink-0" />
-                    <span className="font-semibold">Project Manifest</span>
+                    <span className="font-semibold">Overview</span>
                   </button>
-                 
+
                 </nav>
               </div>
 
-              
+
             </div>
           </div>
 
-         
+
         </div>
       )}
     </div>

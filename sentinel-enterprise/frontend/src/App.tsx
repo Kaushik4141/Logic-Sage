@@ -1,14 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
-import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
+
 import { askSentinelAI } from "./lib/api";
 import { syncTelemetryToCloud } from "./lib/cloudSync";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,13 +12,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Input } from "@/components/ui/input";
 import {
   Users,
-  Settings,
   Search,
   Shield,
   Terminal,
   Loader2,
-  Signal,
-  MoreVertical,
   LayoutGrid,
   Library,
   Server,
@@ -57,6 +49,7 @@ interface ChatMessage {
 export default function App() {
   const [activeTab, setActiveTab] = useState("summary");
   const [message, setMessage] = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -108,34 +101,7 @@ export default function App() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  async function handleForceSync() {
-    console.info("[Force Sync] Button clicked");
-    try {
-      await runLocalCapture();
 
-      // Raw Tauri SQL fallback — bypasses Drizzle entirely
-      const tauriDb = await getTauriDb();
-      const rawResult = await tauriDb.select<Record<string, unknown>[]>(
-        "SELECT * FROM local_telemetry ORDER BY id DESC LIMIT 1",
-      );
-      console.info("[Raw Tauri SQL] Latest telemetry:", rawResult);
-
-      // Drizzle path
-      const latestTelemetry = await getLatestTelemetry();
-
-      if (latestTelemetry?.codeSnippets) {
-        const parsed = JSON.parse(latestTelemetry.codeSnippets) as string[];
-        console.info("[Drizzle DB] Latest telemetry:", {
-          ...latestTelemetry,
-          codeSnippets: parsed,
-        });
-      } else {
-        console.info("[Drizzle DB] Latest telemetry:", latestTelemetry);
-      }
-    } catch (error) {
-      console.error("[Force Sync] Failed", error);
-    }
-  }
 
   async function handleSendMessage(query: string) {
     if (!query.trim() || isLoading) return;
@@ -184,7 +150,7 @@ export default function App() {
   }
 
   return (
-    <TooltipProvider delay={0}>
+    <TooltipProvider delayDuration={0}>
       <div className="dark h-screen w-full bg-background text-foreground font-sans overflow-hidden flex">
            
 
@@ -232,6 +198,16 @@ export default function App() {
                     ref={searchInputRef}
                     type="search"
                     placeholder="Search context..."
+                    value={globalSearch}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                      if (e.key === "Enter" && globalSearch.trim()) {
+                        setActiveTab("chat");
+                        void handleSendMessage(globalSearch);
+                        setGlobalSearch("");
+                        searchInputRef.current?.blur();
+                      }
+                    }}
                     className="h-7 w-full bg-muted/40 pl-8 pr-10 text-[11px] border-none ring-0 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all font-sans"
                   />
                   <div className="absolute right-2 top-1.5 hidden items-center gap-1 sm:flex pointer-events-none opacity-40 group-focus-within:opacity-0 transition-opacity">
@@ -698,7 +674,6 @@ export default function App() {
                     </button>
                     <Separator orientation="vertical" className="h-4" />
                     <Tooltip>
-                      {/* @ts-expect-error - asChild type issue with Radix */}
                       <TooltipTrigger asChild>
                         <button
                           onClick={() => void handleCloudSync()}
