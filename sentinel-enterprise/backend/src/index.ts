@@ -4,8 +4,22 @@ import cors from 'cors';
 import { generateText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import webhookRouter from './webhookrouter.js';
-import { piecesRAG } from './lib/pieces-rag.js';
+import { piecesRAG, type RagReference } from './lib/pieces-rag.js';
 import { getRecentCodeSnippets } from './lib/pieces.js';
+
+const REDACTED = '[REDACTED_BY_SENTINEL]';
+
+function scrubSensitiveText(rawText: string | null | undefined): string {
+  if (!rawText) return '';
+
+  let scrubbed = rawText;
+  scrubbed = scrubbed.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED);
+  scrubbed = scrubbed.replace(/\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, REDACTED);
+  scrubbed = scrubbed.replace(/\b(Bearer\s+)([a-zA-Z0-9\-._~+/]+=*)/gi, `$1${REDACTED}`);
+  scrubbed = scrubbed.replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, REDACTED);
+  scrubbed = scrubbed.replace(/\/Users\/[^\s/]+/g, REDACTED);
+  return scrubbed;
+}
 
 // --- Cerebras AI Provider ---
 const cerebras = createOpenAI({
@@ -77,6 +91,7 @@ interface CollaborateRequest {
 interface CollaborateSuccessResponse {
   status: 'success';
   text: string;
+  references?: RagReference[];
 }
 
 interface CollaborateErrorResponse {
@@ -113,16 +128,16 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
     // Condense local context to prevent massive payloads from blowing up the token limit
     let condensedContext = "";
     if (local_context) {
-      const rawContext = JSON.stringify(local_context, null, 2);
-      condensedContext = rawContext.length > 4000 ? rawContext.substring(0, 4000) + "... (truncated)" : rawContext;
+      const rawContext = scrubSensitiveText(JSON.stringify(local_context, null, 2));
+      condensedContext = rawContext.length > 10000 ? rawContext.substring(0, 10000) + "... (truncated)" : rawContext;
     }
 
     const augmentedQuery = `Branch: ${branch ?? 'unknown'}\nLocal Context:\n${condensedContext}\n\nUser Query: ${question}`;
 
-    // RAG: retrieves relevant Pieces chunks using the core question, then sends the augmented query to Cerebras
-    const answer = await piecesRAG.ask(question, augmentedQuery);
+    // Pieces context drives both the answer and the supporting references.
+    const { text, references } = await piecesRAG.ask(question, augmentedQuery);
 
-    res.json({ status: 'success', text: answer });
+    res.json({ status: 'success', text, references });
   } catch (error: any) {
     console.error('Error in /api/collaborate:', error);
     res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });

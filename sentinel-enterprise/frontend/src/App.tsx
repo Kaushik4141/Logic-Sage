@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
 import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
-import { askSentinelAI } from "./lib/api";
+import { askSentinelAI, type RagReference } from "./lib/api";
 import { syncTelemetryToCloud } from "./lib/cloudSync";
 import {
   ResizableHandle,
@@ -35,7 +35,8 @@ import {
   Paperclip,
   Smile,
   Command,
-  CloudUpload
+  CloudUpload,
+  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,7 @@ interface ChatMessage {
   id: number;
   role: "user" | "ai";
   content: string;
+  references?: RagReference[];
 }
 
 export default function App() {
@@ -59,12 +61,43 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isChatAtBottom, setIsChatAtBottom] = useState(true);
+
+  function scrollChatToBottom() {
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: "smooth",
+    });
+  }
 
   // Auto-scroll to bottom when new messages appear
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isLoading]);
+    if (activeTab !== "chat") return;
+    scrollChatToBottom();
+  }, [activeTab, chatHistory, isLoading]);
+
+  useEffect(() => {
+    if (activeTab !== "chat") return;
+
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    const updateScrollState = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setIsChatAtBottom(distanceFromBottom < 64);
+    };
+
+    updateScrollState();
+    viewport.addEventListener("scroll", updateScrollState);
+
+    return () => viewport.removeEventListener("scroll", updateScrollState);
+  }, [activeTab, chatHistory.length, isLoading]);
 
   useEffect(() => {
     const runPiecesHealthCheck = async () => {
@@ -140,7 +173,8 @@ export default function App() {
       const aiMessage: ChatMessage = {
         id: Date.now() + 1,
         role: "ai",
-        content: aiResponse,
+        content: aiResponse.text,
+        references: aiResponse.references,
       };
       setChatHistory((prev) => [...prev, aiMessage]);
     } catch (error) {
@@ -166,6 +200,61 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
+  }
+
+function renderMessageContent(content: string, references: RagReference[] = []) {
+    const referencesById = new Map(references.map((reference) => [reference.id, reference]));
+    const parts = content.split(/(\[\d+\](?:\[\d+\])*)/g).filter(Boolean);
+
+    return parts.map((part, index) => {
+      const matchesCitation = /^(\[\d+\])+$/g.test(part);
+
+      if (!matchesCitation) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      const ids = [...part.matchAll(/\[(\d+)\]/g)]
+        .map((match) => Number(match[1]))
+        .filter((id, citationIndex, allIds) => allIds.indexOf(id) === citationIndex)
+        .filter((id) => referencesById.has(id));
+
+      if (ids.length === 0) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      return (
+        <span key={`${part}-${index}`} className="mx-1 inline-flex flex-wrap items-center gap-1 align-middle">
+          {(() => {
+            const primaryReference = referencesById.get(ids[0])!;
+            const extraCount = ids.length - 1;
+            const compactLabel = primaryReference.title.length > 16
+              ? `${primaryReference.title.slice(0, 16)}...`
+              : primaryReference.title;
+            const titleText = ids
+              .map((id) => {
+                const reference = referencesById.get(id)!;
+                return `[${reference.id}] ${reference.title} • ${reference.timestamp}\n${reference.snippet}`;
+              })
+              .join("\n\n");
+
+            return (
+              <span
+                title={titleText}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/90 px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+              >
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
+                  {primaryReference.id}
+                </span>
+                <span>{primaryReference.technology ?? compactLabel}</span>
+                {extraCount > 0 && (
+                  <span className="text-[9px] text-muted-foreground/80">+{extraCount}</span>
+                )}
+              </span>
+            );
+          })()}
+        </span>
+      );
+    });
   }
 
   return (
@@ -674,7 +763,7 @@ export default function App() {
                 {activeTab === "chat" && (
                   /* Chat View */
                   <div className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden relative">
-                     <ScrollArea className="flex-1 p-6 z-10">
+                     <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-6 z-10">
                        <div className="max-w-3xl mx-auto space-y-6">
                          {chatHistory.length === 0 && !isLoading && (
                            <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
@@ -710,10 +799,60 @@ export default function App() {
                                        <Terminal className="h-4 w-4 text-primary" />
                                      </div>
                                      <span className="text-xs font-bold tracking-widest uppercase text-primary">Sentinel AI</span>
+                                    </div>
+                                   <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                     {renderMessageContent(msg.content, msg.references)}
                                    </div>
-                                   <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
-                                     {msg.content}
-                                   </p>
+                                    {msg.references && msg.references.length > 0 && (
+                                      <div className="mt-4 border-t border-primary/10 pt-4">
+                                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                          Sources
+                                        </div>
+                                        <div className="space-y-2">
+                                        {msg.references.map((reference) => (
+                                          <div
+                                            key={`${msg.id}-${reference.id}`}
+                                            className="rounded-xl border border-border/60 bg-background/70 p-3 text-left shadow-sm"
+                                          >
+                                            <div className="flex items-start gap-3">
+                                              {reference.imageUrl ? (
+                                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-background/80 p-2">
+                                                  <img
+                                                    src={reference.imageUrl}
+                                                    alt={reference.imageAlt ?? reference.technology ?? "Technology"}
+                                                    className="h-8 w-8 object-contain"
+                                                  />
+                                                </div>
+                                              ) : (
+                                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-gradient-to-br from-primary/15 to-transparent text-sm font-bold text-primary">
+                                                  {(reference.technology ?? reference.title ?? "T").slice(0, 2).toUpperCase()}
+                                                </div>
+                                              )}
+                                              <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
+                                                    [{reference.id}]
+                                                  </span>
+                                                  <span className="truncate">
+                                                    {reference.technology ?? (reference.title || "Technology")}
+                                                  </span>
+                                                </div>
+                                                <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                                                  Technology Reference
+                                                </p>
+                                                <p className="mt-2 text-xs leading-relaxed text-foreground/80">
+                                                  {reference.details ?? reference.snippet}
+                                                </p>
+                                                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                                                  {reference.snippet}
+                                                </p>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        </div>
+                                      </div>
+                                    )}
                                  </div>
                                ) : (
                                  <>
@@ -751,7 +890,20 @@ export default function App() {
                          </AnimatePresence>
                          <div ref={chatEndRef} />
                        </div>
-                     </ScrollArea>
+                     </div>
+
+                     {!isChatAtBottom && (
+                       <div className="pointer-events-none absolute bottom-28 right-8 z-20">
+                         <button
+                           type="button"
+                           onClick={scrollChatToBottom}
+                           className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-3 py-2 text-xs font-medium text-primary shadow-lg backdrop-blur transition hover:border-primary/40 hover:bg-primary/5"
+                         >
+                           <ChevronDown className="h-4 w-4" />
+                           Latest
+                         </button>
+                       </div>
+                     )}
 
                      {/* Chat Input Area */}
                      <div className="p-4 border-t border-border/50 bg-background/50 backdrop-blur-md z-10">

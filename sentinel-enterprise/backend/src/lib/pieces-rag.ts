@@ -72,6 +72,156 @@ interface WorkstreamChunk {
   type: "workstream";
 }
 
+export interface RagReference {
+  id: number;
+  title: string;
+  timestamp?: string;
+  snippet: string;
+  score?: string;
+  url?: string;
+  source?: string;
+  technology?: string;
+  details?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+}
+
+function normalizeReferenceText(rawText: string | null | undefined): string {
+  if (!rawText) return "";
+
+  return rawText
+    .replace(/\\r\\n/g, " ")
+    .replace(/\\n/g, " ")
+    .replace(/\\r/g, " ")
+    .replace(/\r\n/g, " ")
+    .replace(/\n/g, " ")
+    .replace(/\r/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractCitedReferenceIds(answer: string): number[] {
+  const ids = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
+  return ids.filter((id, index) => Number.isFinite(id) && ids.indexOf(id) === index);
+}
+
+function slugifyTechnologyName(rawText: string): string {
+  return rawText
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+interface ReferenceEnrichment {
+  id: number;
+  technology: string;
+  details: string;
+  imageSlug: string;
+}
+
+async function enrichReferencesWithTechnology(
+  cerebras: ReturnType<typeof createOpenAI>,
+  references: RagReference[]
+): Promise<RagReference[]> {
+  if (references.length === 0) return references;
+
+  const prompt = `You are enriching citation references for a developer assistant UI.
+
+For each reference:
+- identify the primary technology, protocol, product, or concept actually being referenced
+- do not return source bucket names like OS_SERVER, workstream, chunk, or generic labels
+- keep details short and useful, around 1 sentence
+- if the technology has a recognizable Simple Icons slug, provide it
+- if not, use an empty string for imageSlug
+
+Return strict JSON only in this shape:
+{"items":[{"id":1,"technology":"JWT","details":"Short explanation","imageSlug":"jsonwebtokens"}]}
+
+References:
+${JSON.stringify(
+  references.map((reference) => ({
+    id: reference.id,
+    title: reference.title,
+    snippet: reference.snippet,
+  })),
+  null,
+  2
+)}`;
+
+  try {
+    const result = await generateText({
+      model: cerebras.chat(process.env.CEREBRAS_PRIMARY_MODEL ?? "llama3.1-8b"),
+      prompt,
+    });
+
+    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return references;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as { items?: ReferenceEnrichment[] };
+    const enrichments = new Map((parsed.items ?? []).map((item) => [item.id, item]));
+
+    return references.map((reference) => {
+      const enrichment = enrichments.get(reference.id);
+      if (!enrichment) {
+        return reference;
+      }
+
+      const cleanedTechnology = normalizeReferenceText(enrichment.technology) || reference.title;
+      const cleanedDetails = normalizeReferenceText(enrichment.details) || reference.snippet;
+      const imageSlug = slugifyTechnologyName(enrichment.imageSlug || cleanedTechnology);
+
+      return {
+        ...reference,
+        technology: cleanedTechnology,
+        details: cleanedDetails,
+        ...(imageSlug ? { imageUrl: `https://cdn.simpleicons.org/${imageSlug}` } : {}),
+        imageAlt: cleanedTechnology,
+      };
+    });
+  } catch (error) {
+    console.warn("[PiecesRAG] Reference enrichment failed:", error);
+    return references;
+  }
+}
+
+const REDACTED = "[REDACTED_BY_SENTINEL]";
+
+function scrubSensitiveText(rawText: string | null | undefined): string {
+  if (!rawText) return "";
+
+  let scrubbed = rawText;
+
+  scrubbed = scrubbed.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED);
+  scrubbed = scrubbed.replace(/\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, REDACTED);
+  scrubbed = scrubbed.replace(/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, REDACTED);
+  scrubbed = scrubbed.replace(/\beyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g, REDACTED);
+  scrubbed = scrubbed.replace(/\b(Bearer\s+)([a-zA-Z0-9\-._~+/]+=*)/gi, `$1${REDACTED}`);
+  scrubbed = scrubbed.replace(/\b(?:sk|pk|rk)_(?:test|live)_[a-zA-Z0-9]{24,}\b/g, REDACTED);
+  scrubbed = scrubbed.replace(
+    /([a-zA-Z0-9_]*(?:password|passwd|pwd|secret|token|api_?key|db_?pass|oauth)[a-zA-Z0-9_]*\s*["']?\s*[:=]\s*["']?)([^"'\s;,<>]+)(["']?)/gi,
+    (_match, prefix, value, suffix) => {
+      if (typeof value !== "string" || value === REDACTED) return `${prefix}${value}${suffix}`;
+
+      const lowerValue = value.toLowerCase();
+      if (["true", "false", "null", "undefined"].includes(lowerValue)) {
+        return `${prefix}${value}${suffix}`;
+      }
+
+      if (/^\d+$/.test(value) && value.length < 4) {
+        return `${prefix}${value}${suffix}`;
+      }
+
+      return `${prefix}${REDACTED}${suffix}`;
+    }
+  );
+  scrubbed = scrubbed.replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, REDACTED);
+  scrubbed = scrubbed.replace(/\/Users\/[^\s/]+/g, REDACTED);
+
+  return scrubbed;
+}
+
 /**
  * Parses Pieces OS workstream format.
  * Splits on the "---" separator between entries.
@@ -289,35 +439,59 @@ export class PiecesRAG {
   }
 
   /**
-   * Full RAG query → Cerebras answer.
-   * Standalone: retrieves chunks, builds prompt, calls Cerebras.
+   * Full RAG query → Cerebras answer + references.
+   * Returns { text, references } so the frontend can render citation chips.
    */
-  async ask(searchQuery: string, fullQuery?: string): Promise<string> {
+  async ask(
+    searchQuery: string,
+    fullQuery?: string
+  ): Promise<{ text: string; references: RagReference[] }> {
     if (!this.isReady) {
-      return "RAG pipeline not ready yet. Please wait for indexing to complete.";
+      return { text: "RAG pipeline not ready yet. Please wait for indexing to complete.", references: [] };
     }
 
-    const chunks = await this.retrieve(searchQuery, 5);
+    const chunks = await this.retrieve(searchQuery, 8);
 
     if (chunks.length === 0) {
-      return "I couldn't find relevant context in your Pieces data for that question.";
+      return { text: "I couldn't find relevant context in your Pieces data for that question.", references: [] };
     }
+
+    const references: RagReference[] = chunks.map((c, index) => ({
+      id: index + 1,
+      title: normalizeReferenceText(scrubSensitiveText(String(c.metadata["title"] ?? "Reference"))),
+      timestamp: String(c.metadata["timestamp"] ?? "unknown"),
+      snippet: normalizeReferenceText(
+        scrubSensitiveText(
+          c.content.substring(0, 220) + (c.content.length > 220 ? "..." : "")
+        )
+      ),
+      score: String(c.metadata["score"] ?? "0"),
+      source: "pieces",
+    }));
 
     const context = chunks
       .map(
         (c, i) =>
-          `[${i + 1}] From "${c.metadata["title"]}" (${c.metadata["timestamp"]}):\n${c.content}`
+          `[${i + 1}] From "${scrubSensitiveText(String(c.metadata["title"] ?? "Unknown"))}" (${c.metadata["timestamp"]}):\n${scrubSensitiveText(c.content)}`
       )
       .join("\n\n");
 
     const prompt = `You are Sentinel, an AI assistant with access to the developer's recent activity from Pieces OS.
 
-Use the context below to answer the user's question. Be specific, cite which workstream the info came from, and be concise.
+Use the Pieces context below to understand the developer's local situation and answer the user's question. Provide a helpful, clear response. Synthesize the information across multiple sources if applicable.
 If the answer isn't in the context, say so clearly.
+Focus on technical explanation only. Do not reveal personal details, usernames, emails, phone numbers, local machine paths, secrets, or private identifiers from the context even if they appear there.
+Use the numbered Pieces context for citations.
+When you make a factual or technology-specific claim supported by the context, cite it inline with the matching square-bracket reference number like [1] or [2].
+Use citations sparingly and only when they help support the final answer.
+Do not invent references, and do not cite anything outside the numbered Pieces context block.
+If multiple sources support the same sentence, cite multiple references like [1][3].
+If the user asks for an image, screenshot, or visual reference and the context does not contain one, say that the available context does not include an image.
+Do not quote or dump raw context chunks. Write a normal clean answer for the user.
 
---- RELEVANT CONTEXT ---
+--- PIECES CONTEXT ---
 ${context}
---- END CONTEXT ---
+--- END PIECES CONTEXT ---
 
 User query details: 
 ${fullQuery || searchQuery}
@@ -331,7 +505,19 @@ Answer:`;
       prompt,
     });
 
-    return result.text ?? "No response from Cerebras.";
+    const answerText = result.text ?? "No response from Cerebras.";
+    const citedReferenceIds = extractCitedReferenceIds(answerText);
+    const usedReferences =
+      citedReferenceIds.length > 0
+        ? references.filter((reference) => citedReferenceIds.includes(reference.id))
+        : [];
+
+    const enrichedReferences = await enrichReferencesWithTechnology(
+      this.cerebras,
+      usedReferences
+    );
+
+    return { text: answerText, references: enrichedReferences };
   }
 
   /** Health check — used by /api/rag/status */
