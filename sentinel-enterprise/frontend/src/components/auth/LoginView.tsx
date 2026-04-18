@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShieldAlert, User, Shield, ArrowRight, Loader2, KeyRound } from "lucide-react";
+import { ShieldAlert, User, Shield, ArrowRight, Loader2, KeyRound, UserPlus, LogIn } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 type LoginViewProps = {
@@ -8,6 +8,7 @@ type LoginViewProps = {
 };
 
 export function LoginView({ onLogin }: LoginViewProps) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [role, setRole] = useState<"lead" | "member">("member");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +21,8 @@ export function LoginView({ onLogin }: LoginViewProps) {
     setIsAuthenticating(true);
     setError(null);
     try {
-      await onLogin(email, password, role);
+      // In login mode, we still pass the role but the backend ignores it for existing users
+      await onLogin(email, password, mode === "signup" ? role : "member");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -49,46 +51,89 @@ export function LoginView({ onLogin }: LoginViewProps) {
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
           {/* Header */}
-          <div className="text-center mb-10 space-y-3">
+          <div className="text-center mb-8 space-y-3">
             <div className="mx-auto h-16 w-16 bg-primary/10 rounded-2xl border border-primary/20 flex items-center justify-center relative shadow-[0_0_30px_-5px_rgba(var(--primary),0.3)]">
               <ShieldAlert className="h-8 w-8 text-primary absolute" />
             </div>
             <h1 className="text-3xl font-bold tracking-tighter uppercase text-foreground">Sentinel <span className="text-primary font-light">OS</span></h1>
             <p className="text-sm font-mono text-muted-foreground uppercase tracking-widest px-4">
-              Authorized personnel only
+              {mode === "login" ? "Welcome back, operator" : "Initialize new identity"}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Role Selection */}
-            <div className="grid grid-cols-2 gap-3 p-1.5 bg-muted/30 rounded-xl border border-border/50">
-              <button
-                type="button"
-                onClick={() => setRole("member")}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
-                  role === "member"
-                    ? "bg-background shadow-sm text-foreground ring-1 ring-border"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-              >
-                <User className="h-3.5 w-3.5" />
-                Member
-              </button>
-              <button
-                type="button"
-                onClick={() => setRole("lead")}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
-                  role === "lead"
-                    ? "bg-primary/10 shadow-sm text-primary ring-1 ring-primary/30"
-                    : "text-muted-foreground hover:text-primary/70 hover:bg-primary/5"
-                )}
-              >
-                <Shield className="h-3.5 w-3.5" />
-                Team Lead
-              </button>
-            </div>
+          {/* Mode Toggle */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-muted/20 rounded-xl border border-border/40 mb-6">
+            <button
+              type="button"
+              onClick={() => { setMode("login"); setError(null); }}
+              className={cn(
+                "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                mode === "login"
+                  ? "bg-background shadow-sm text-foreground ring-1 ring-border"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              )}
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              Login
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode("signup"); setError(null); }}
+              className={cn(
+                "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                mode === "signup"
+                  ? "bg-background shadow-sm text-foreground ring-1 ring-border"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              )}
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Sign Up
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Role Selection — only visible in signup mode */}
+            <AnimatePresence mode="wait">
+              {mode === "signup" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="overflow-hidden"
+                >
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 mb-1.5 block">Access Level</label>
+                  <div className="grid grid-cols-2 gap-3 p-1.5 bg-muted/30 rounded-xl border border-border/50">
+                    <button
+                      type="button"
+                      onClick={() => setRole("member")}
+                      className={cn(
+                        "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                        role === "member"
+                          ? "bg-background shadow-sm text-foreground ring-1 ring-border"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      )}
+                    >
+                      <User className="h-3.5 w-3.5" />
+                      Member
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRole("lead")}
+                      className={cn(
+                        "flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                        role === "lead"
+                          ? "bg-primary/10 shadow-sm text-primary ring-1 ring-primary/30"
+                          : "text-muted-foreground hover:text-primary/70 hover:bg-primary/5"
+                      )}
+                    >
+                      <Shield className="h-3.5 w-3.5" />
+                      Team Lead
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Inputs */}
             <div className="space-y-4">
@@ -101,7 +146,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-background/50 border border-border rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/50"
-                    placeholder="Enter your system clearance email..."
+                    placeholder="Enter your email..."
                     required
                   />
                 </div>
@@ -146,14 +191,27 @@ export function LoginView({ onLogin }: LoginViewProps) {
               <div className="absolute inset-0 w-full h-full bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
               {isAuthenticating ? (
                 <span className="flex items-center gap-2 z-10"><Loader2 className="h-4 w-4 animate-spin" /> Authenticating...</span>
+              ) : mode === "login" ? (
+                <span className="flex items-center gap-2 z-10">Access System <ArrowRight className="h-3.5 w-3.5" /></span>
               ) : (
-                <span className="flex items-center gap-2 z-10">Initialize Session <ArrowRight className="h-3.5 w-3.5" /></span>
+                <span className="flex items-center gap-2 z-10">Create Identity <UserPlus className="h-3.5 w-3.5" /></span>
               )}
             </button>
           </form>
 
+          {/* Footer hint */}
+          <div className="mt-6 text-center">
+            <p className="text-[11px] text-muted-foreground/60 font-mono">
+              {mode === "login" ? (
+                <>Don't have an account? <button type="button" onClick={() => { setMode("signup"); setError(null); }} className="text-primary hover:underline uppercase tracking-wider font-bold">Sign up</button></>
+              ) : (
+                <>Already registered? <button type="button" onClick={() => { setMode("login"); setError(null); }} className="text-primary hover:underline uppercase tracking-wider font-bold">Login</button></>
+              )}
+            </p>
+          </div>
+
           {/* Footer Decoration */}
-          <div className="mt-8 flex justify-center gap-1.5 opacity-40">
+          <div className="mt-5 flex justify-center gap-1.5 opacity-40">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="h-1 w-1 rounded-full bg-foreground" />
             ))}
