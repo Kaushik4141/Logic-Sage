@@ -26,6 +26,8 @@ export interface SentinelAIResponse {
 export interface MemberLocalContext {
   error_log?: string;
   teammate_recent_code?: string;
+  developer_id?: string;
+  developer_name?: string;
 }
 
 /**
@@ -33,7 +35,10 @@ export interface MemberLocalContext {
  * then sends them alongside the user's question to the Sentinel AI backend.
  * Returns { text, references } so the UI can render citation chips.
  */
-export async function askSentinelAI(userQuery: string): Promise<{ text: string; references: RagReference[] }> {
+export async function askSentinelAI(
+  userQuery: string,
+  options?: { teamId?: string | null },
+): Promise<{ text: string; references: RagReference[] }> {
   try {
     // 1. Fetch the most recent telemetry row from local SQLite via Drizzle
     const latestTelemetry = await getLatestTelemetry();
@@ -58,6 +63,8 @@ export async function askSentinelAI(userQuery: string): Promise<{ text: string; 
     // 3. Construct the payload matching the API contract
     const payload = {
       user_query: userQuery,
+      mode: "team_overview",
+      team_id: options?.teamId ?? undefined,
       local_context: {
         error_log: "No error log available (background telemetry capture).",
         teammate_recent_code: teammateRecentCode,
@@ -107,10 +114,13 @@ export async function askSentinelWithContext(
 ): Promise<{ text: string; references: RagReference[] }> {
   const payload = {
     user_query: userQuery,
+    mode: "member_profile",
     local_context: {
       error_log: localContext.error_log ?? "No error log available.",
       teammate_recent_code:
         localContext.teammate_recent_code ?? "No recent code snippet available from Pieces OS.",
+      developer_id: localContext.developer_id,
+      developer_name: localContext.developer_name,
     },
     branch,
   };

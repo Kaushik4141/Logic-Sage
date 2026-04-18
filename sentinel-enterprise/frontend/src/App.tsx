@@ -245,7 +245,9 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const aiResponse = await askSentinelAI(query.trim());
+      const aiResponse = await askSentinelAI(query.trim(), {
+        teamId: currentUser?.teamId ?? null,
+      });
       const aiMessage: ChatMessage = {
         id: Date.now() + 1,
         role: "ai",
