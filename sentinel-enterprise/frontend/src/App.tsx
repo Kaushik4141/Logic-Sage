@@ -81,23 +81,21 @@ export default function App() {
     let mounted = true;
     const fetchTeam = async () => {
       if (!currentUser || !currentUser.teamId) return;
-      // For leads, always fetch regardless of teamStatus
-      if (currentUser.role !== 'lead' && teamStatus !== 'assigned') return;
       try {
         // Try fetching by teamId first
         let res = await fetch(`https://edge-api.kaushik0h0s.workers.dev/api/team/${encodeURIComponent(currentUser.teamId)}`);
         let json = await res.json();
         let members = json.status === "success" ? json.data : [];
         
-        // If lead and no results found with teamId, try with email
-        if (currentUser.role === 'lead' && members.length === 0 && currentUser.teamId !== currentUser.email) {
+        // If no results found with teamId, try with email (handles old UUID teamIds)
+        if (members.length === 0 && currentUser.teamId !== currentUser.email) {
           res = await fetch(`https://edge-api.kaushik0h0s.workers.dev/api/team/${encodeURIComponent(currentUser.email)}`);
           json = await res.json();
           members = json.status === "success" ? json.data : [];
         }
 
-        // Ensure the lead themselves always appears in the list
-        if (currentUser.role === 'lead' && !members.some((m: any) => m.id === currentUser.id)) {
+        // Ensure the current user always appears in the list
+        if (!members.some((m: any) => m.id === currentUser.id)) {
           members = [{ id: currentUser.id, email: currentUser.email, role: currentUser.role, teamId: currentUser.teamId }, ...members];
         }
         
