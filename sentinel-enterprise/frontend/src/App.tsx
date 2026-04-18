@@ -266,13 +266,15 @@ export default function App() {
           {(() => {
             const primaryReference = referencesById.get(ids[0])!;
             const extraCount = ids.length - 1;
-            const compactLabel = primaryReference.title.length > 16
-              ? `${primaryReference.title.slice(0, 16)}...`
-              : primaryReference.title;
+            const displayTitle = primaryReference.technology ?? primaryReference.title ?? "Technology";
+            const compactLabel = displayTitle.length > 16
+              ? `${displayTitle.slice(0, 16)}...`
+              : displayTitle;
             const titleText = ids
               .map((id) => {
                 const reference = referencesById.get(id)!;
-                return `[${reference.id}] ${reference.title} • ${reference.timestamp}\n${reference.snippet}`;
+                const referenceTitle = reference.technology ?? reference.title ?? "Technology";
+                return `[${reference.id}] ${referenceTitle}${reference.timestamp ? ` • ${reference.timestamp}` : ""}\n${reference.details ?? reference.snippet}`;
               })
               .join("\n\n");
 
@@ -284,7 +286,7 @@ export default function App() {
                 <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
                   {primaryReference.id}
                 </span>
-                <span>{primaryReference.technology ?? compactLabel}</span>
+                <span>{compactLabel}</span>
                 {extraCount > 0 && (
                   <span className="text-[9px] text-muted-foreground/80">+{extraCount}</span>
                 )}
