@@ -25,6 +25,7 @@ type BlueprintRequestBody = {
 };
 
 type SyncRequestBody = {
+  developer_id: string;
   branch: string;
   codeSnippets: string[] | string;
   timestamp: string;
@@ -88,7 +89,11 @@ function toBlueprintRequestBody(payload: Record<string, unknown>): BlueprintRequ
 }
 
 function toSyncRequestBody(payload: Record<string, unknown>): SyncRequestBody | null {
-  if (typeof payload.branch !== "string" || typeof payload.timestamp !== "string") {
+  if (
+    typeof payload.developer_id !== "string" ||
+    typeof payload.branch !== "string" ||
+    typeof payload.timestamp !== "string"
+  ) {
     return null;
   }
 
@@ -105,6 +110,7 @@ function toSyncRequestBody(payload: Record<string, unknown>): SyncRequestBody | 
   }
 
   return {
+    developer_id: payload.developer_id,
     branch: payload.branch,
     codeSnippets,
     timestamp: payload.timestamp,
@@ -160,12 +166,21 @@ async function handlePostSync(request: Request, env: Env, cors: Record<string, s
   }
 
   const body = toSyncRequestBody(rawBody);
-  console.log('[Worker] Received payload:', body);
+  
+  if (body) {
+    console.log('[Worker] Received payload:', {
+      developer_id: body.developer_id,
+      branch: body.branch,
+      timestamp: body.timestamp,
+      snippetsCount: Array.isArray(body.codeSnippets) ? body.codeSnippets.length : 1
+    });
+  }
+
   if (!body) {
     return json(
       {
         status: "error",
-        message: "'branch' and 'timestamp' are required string fields.",
+        message: "'developer_id', 'branch' and 'timestamp' are required string fields.",
       },
       400,
       cors,
@@ -182,6 +197,7 @@ async function handlePostSync(request: Request, env: Env, cors: Record<string, s
 
   try {
     const result = await db.insert(telemetry).values({
+      developerId: body.developer_id.trim(),
       branch: body.branch.trim(),
       codeSnippets: serializedSnippets,
       timestamp: body.timestamp,
@@ -235,7 +251,7 @@ export default {
       if (historyMatch && request.method === "GET") {
         const username = decodeURIComponent(historyMatch[1]);
         const stmt = env.DB.prepare(
-          "SELECT * FROM enterprise_events WHERE developer = ? ORDER BY id DESC LIMIT 5"
+          "SELECT * FROM telemetry WHERE developer_id = ? ORDER BY id DESC LIMIT 5"
         ).bind(username);
         const { results } = await stmt.all();
         return json({ status: "success", data: results }, 200, cors);
