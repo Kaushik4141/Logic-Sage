@@ -272,6 +272,7 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
     }),
     [latestEntry, latestSnippets],
   );
+  
   const snippetMetadata = useMemo(
     () => extractSnippetMetadata(latestSnippets),
     [latestSnippets],
