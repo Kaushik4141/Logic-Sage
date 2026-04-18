@@ -13,20 +13,26 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-const MOCK_TEAM_CONTEXT = [
-  { id: 1, name: "David", role: "Backend Engineer", isLive: true, avatar: "https://github.com/shadcn.png" },
-  { id: 2, name: "Sarah", role: "Frontend Lead", isLive: false, avatar: "https://github.com/leerob.png" },
-  { id: 3, name: "Alex", role: "DevOps Engineer", isLive: false, avatar: "https://github.com/evilrabbit.png" }
-];
+export interface TeamMember {
+  id: string;
+  email: string;
+  jobTitle?: string | null;
+  role: string;
+  // Dynamic fields
+  name?: string;
+  avatar?: string;
+  isLive?: boolean;
+}
 
 interface SidebarProps {
   isCollapsed: boolean;
   onToggle: () => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  teamMembers: TeamMember[];
 }
 
-export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: SidebarProps) => {
+export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange, teamMembers }: SidebarProps) => {
   return (
     <div className={cn(
       "flex flex-col h-full min-h-0 transition-all duration-300 ease-in-out border-r border-border bg-background",
@@ -48,7 +54,7 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
             </Tooltip>
 
             <div className="flex flex-col gap-4 items-center">
-              {MOCK_TEAM_CONTEXT.map((member) => (
+              {teamMembers.map((member) => (
                 <Tooltip key={member.id}>
                   <TooltipTrigger asChild>
                     <div
@@ -56,10 +62,10 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                       onClick={() => onTabChange(`member-${member.id}`)}
                     >
                       <img
-                        src={member.avatar}
+                        src={member.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${member.email}`}
                         className="h-10 w-10 rounded-full border border-zinc-800 bg-black object-cover"
                         referrerPolicy="no-referrer"
-                        alt={member.name}
+                        alt={member.name || member.email}
                       />
                       {member.isLive && (
                         <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-[#0c0c0c]" />
@@ -68,8 +74,8 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                   </TooltipTrigger>
                   <TooltipContent side="right">
                     <div className="space-y-1">
-                      <p className="font-bold text-xs">{member.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{member.role}</p>
+                      <p className="font-bold text-xs">{member.name || member.email.split('@')[0]}</p>
+                      <p className="text-[10px] text-muted-foreground">{member.jobTitle || member.role}</p>
                     </div>
                   </TooltipContent>
                 </Tooltip>
@@ -118,7 +124,7 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
 
           <div className="flex-1 overflow-y-auto no-scrollbar scrollbar-hide -mx-2 px-2 space-y-6">
             <div className="space-y-1">
-              {MOCK_TEAM_CONTEXT.map((member) => (
+              {teamMembers.map((member) => (
                 <motion.div
                   key={member.id}
                   onClick={() => onTabChange(`member-${member.id}`)}
@@ -131,10 +137,10 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                 >
                   <div className="relative shrink-0">
                     <img
-                      src={member.avatar}
+                      src={member.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${member.email}`}
                       className="h-9 w-9 rounded-full border border-border/50 object-cover"
                       referrerPolicy="no-referrer"
-                      alt={member.name}
+                      alt={member.name || member.email}
                     />
                     {member.isLive && (
                       <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-blue-500 border-2 border-background" />
@@ -142,11 +148,11 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
-                      <p className="text-xs font-semibold truncate text-foreground">{member.name}</p>
+                      <p className="text-xs font-semibold truncate text-foreground">{member.name || member.email.split('@')[0]}</p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <p className="text-[10px] text-muted-foreground truncate font-sans opacity-70">
-                        {member.role}
+                        {member.jobTitle || member.role}
                       </p>
                     </div>
                   </div>

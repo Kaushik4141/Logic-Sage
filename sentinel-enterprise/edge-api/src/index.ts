@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { blueprints, telemetry } from "../schema";
+import { blueprints, telemetry, users, invitations } from "../schema";
 
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -219,6 +219,88 @@ async function handlePostSync(request: Request, env: Env, cors: Record<string, s
   }
 }
 
+async function handlePostLogin(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const rawBody = await parseBody(request);
+  if (!rawBody || typeof rawBody.email !== "string" || typeof rawBody.password !== "string" || typeof rawBody.role !== "string") {
+    return json({ status: "error", message: "Invalid body: require email, password, role." }, 400, cors);
+  }
+
+  const db = drizzle(env.DB);
+  const email = rawBody.email.trim();
+  const password = rawBody.password;
+  const role = rawBody.role === "lead" ? "lead" : "member";
+
+  try {
+    const existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    let user = existingUsers[0];
+
+    if (!user) {
+      // Auto-register for the hackathon demo
+      const id = crypto.randomUUID();
+      [user] = await db.insert(users).values({
+        id,
+        email,
+        password,
+        role,
+        teamId: role === "lead" ? crypto.randomUUID() : null
+      }).returning();
+    } else if (user.password !== password) {
+      return json({ status: "error", message: "Invalid credentials." }, 401, cors);
+    }
+
+    return json({ status: "success", data: user }, 200, cors);
+  } catch (error) {
+    return json({ status: "error", message: String(error) }, 500, cors);
+  }
+}
+
+async function handlePostInvite(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const rawBody = await parseBody(request);
+  if (!rawBody || typeof rawBody.senderEmail !== "string" || typeof rawBody.receiverEmail !== "string") {
+    return json({ status: "error", message: "Invalid body" }, 400, cors);
+  }
+
+  const db = drizzle(env.DB);
+  try {
+    const id = crypto.randomUUID();
+    const result = await db.insert(invitations).values({
+      id,
+      senderEmail: rawBody.senderEmail,
+      receiverEmail: rawBody.receiverEmail,
+      status: "pending",
+      jobTitle: typeof rawBody.jobTitle === "string" ? rawBody.jobTitle : null
+    }).returning();
+    return json({ status: "success", data: result[0] }, 200, cors);
+  } catch (error) {
+    return json({ status: "error", message: String(error) }, 500, cors);
+  }
+}
+
+async function handleAcceptInvite(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const rawBody = await parseBody(request);
+  if (!rawBody || typeof rawBody.inviteId !== "string" || typeof rawBody.userEmail !== "string") {
+    return json({ status: "error", message: "Invalid body" }, 400, cors);
+  }
+
+  const db = drizzle(env.DB);
+  try {
+    // 1. Mark invite accepted
+    await db.update(invitations).set({ status: "accepted" }).where(eq(invitations.id, rawBody.inviteId));
+    
+    // 2. Assign member to the sender's team and propagate the jobTitle
+    const [invite] = await db.select().from(invitations).where(eq(invitations.id, rawBody.inviteId));
+    if (invite) {
+      await db.update(users).set({ 
+        teamId: invite.senderEmail, // Using senderEmail as a proxy for teamId in this demo
+        jobTitle: invite.jobTitle ?? undefined
+      }).where(eq(users.email, rawBody.userEmail));
+    }
+    return json({ status: "success", message: "Invite accepted" }, 200, cors);
+  } catch (error) {
+    return json({ status: "error", message: String(error) }, 500, cors);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const cors = getCorsHeaders(request);
@@ -255,6 +337,50 @@ export default {
         ).bind(username);
         const { results } = await stmt.all();
         return json({ status: "success", data: results }, 200, cors);
+      }
+
+      // --- Identity Routes ---
+      if (url.pathname === "/api/login" && request.method === "POST") {
+        return await handlePostLogin(request, env, cors);
+      }
+      if (url.pathname === "/api/invites" && request.method === "POST") {
+        return await handlePostInvite(request, env, cors);
+      }
+      if (url.pathname === "/api/invites/accept" && request.method === "POST") {
+        return await handleAcceptInvite(request, env, cors);
+      }
+      const invitesMatch = url.pathname.match(/^\/api\/invites\/([^/]+)$/);
+      if (invitesMatch && request.method === "GET") {
+        const email = decodeURIComponent(invitesMatch[1]);
+        const db = drizzle(env.DB);
+        const pending = await db.select().from(invitations)
+           .where(eq(invitations.receiverEmail, email))
+           .orderBy(desc(invitations.createdAt));
+        return json({ status: "success", data: pending.filter((p: any) => p.status === 'pending') }, 200, cors);
+      }
+      
+      const teamMatch = url.pathname.match(/^\/api\/team\/([^/]+)$/);
+      if (teamMatch && request.method === "GET") {
+        const teamId = decodeURIComponent(teamMatch[1]);
+        const db = drizzle(env.DB);
+        const members = await db.select().from(users).where(eq(users.teamId, teamId));
+        return json({ status: "success", data: members }, 200, cors);
+      }
+
+      const roleMatch = url.pathname.match(/^\/api\/team\/([^/]+)\/role$/);
+      if (roleMatch && request.method === "PATCH") {
+        const userId = decodeURIComponent(roleMatch[1]);
+        const rawBody = await parseBody(request);
+        if (!rawBody || typeof rawBody.jobTitle !== "string") {
+          return json({ status: "error", message: "jobTitle is required" }, 400, cors);
+        }
+        const db = drizzle(env.DB);
+        try {
+          await db.update(users).set({ jobTitle: rawBody.jobTitle }).where(eq(users.id, userId));
+          return json({ status: "success", message: "Role updated" }, 200, cors);
+        } catch(err) {
+          return json({ status: "error", message: String(err) }, 500, cors);
+        }
       }
 
       return json({ status: "error", message: "Not Found" }, 404, cors);

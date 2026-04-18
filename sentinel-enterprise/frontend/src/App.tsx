@@ -27,18 +27,17 @@ import {
   Paperclip,
   Smile,
   Command,
-  CloudUpload
+  CloudUpload,
+  LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { MemberProfile } from "@/components/MemberProfile";
-import { Sidebar } from "@/components/Sidebar";
+import { Sidebar, TeamMember } from "@/components/Sidebar";
 
-const MOCK_TEAM_CONTEXT = [
-  { id: 1, name: "David", role: "Backend Engineer", department: "Architecture", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png", branch: "feature/auth-refactor", uptime: "04:12:33", tasks: ["Implement OAuth2 providers", "Secure session tokens", "DB migration scripts"] },
-  { id: 2, name: "Sarah", role: "Frontend Lead", department: "Interface", status: "Viewing", file: "components/Button.tsx", time: "2 min ago", isLive: false, avatar: "https://github.com/leerob.png", branch: "mainline/core-sync", uptime: "02:45:10", tasks: ["Button interaction states", "Review PR #412", "Update design tokens"] },
-  { id: 3, name: "Alex", role: "DevOps Engineer", department: "Platform Ops", status: "Idle", file: "docker-compose.yml", time: "1 hr ago", isLive: false, avatar: "https://github.com/evilrabbit.png", branch: "infra/k8s-cluster", uptime: "12:00:00", tasks: ["Deploy staging servers", "Rotate CI/CD secrets", "Monitor cluster health"] }
-];
+import { LoginView } from "@/components/auth/LoginView";
+import { PendingAssignmentView } from "@/components/auth/PendingAssignmentView";
+import { InviteMemberDialog } from "@/components/ui/InviteMemberDialog";
 
 interface ChatMessage {
   id: number;
@@ -47,6 +46,53 @@ interface ChatMessage {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<{id: string; email: string; role: string; teamId: string | null} | null>(() => {
+    try {
+      const stored = localStorage.getItem('sentinel_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  });
+  const [teamStatus, setTeamStatus] = useState<"unassigned" | "assigned">(() => {
+    try {
+      return (localStorage.getItem('sentinel_team_status') as "assigned" | "unassigned") || "unassigned";
+    } catch { return "unassigned"; }
+  });
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
+  // Persist session to localStorage
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('sentinel_user', JSON.stringify(currentUser));
+      localStorage.setItem('sentinel_team_status', teamStatus);
+    } else {
+      localStorage.removeItem('sentinel_user');
+      localStorage.removeItem('sentinel_team_status');
+    }
+  }, [currentUser, teamStatus]);
+
+  // Fetch team members loop
+  useEffect(() => {
+    let mounted = true;
+    const fetchTeam = async () => {
+      if (!currentUser || teamStatus !== 'assigned' || !currentUser.teamId) return;
+      try {
+        const res = await fetch(`https://edge-api.kaushik0h0s.workers.dev/api/team/${encodeURIComponent(currentUser.teamId)}`);
+        const json = await res.json();
+        if (mounted && json.status === "success") {
+          setTeamMembers(json.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch team", err);
+      }
+    };
+    fetchTeam();
+    const interval = setInterval(fetchTeam, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [currentUser, teamStatus]);
+
   const [activeTab, setActiveTab] = useState("summary");
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -148,6 +194,39 @@ export default function App() {
     }
   }
 
+  // --- Auth & Identity Routing ---
+  if (!currentUser) {
+    return (
+      <LoginView 
+        onLogin={async (email, password, role) => {
+          const res = await fetch(`https://edge-api.kaushik0h0s.workers.dev/api/login`, {
+            method: "POST",
+            body: JSON.stringify({ email, password, role }),
+            headers: { "Content-Type": "application/json" }
+          });
+          const data = await res.json();
+          if (data.status === "success") {
+            const userData = data.data;
+            setCurrentUser(userData);
+            setTeamStatus(userData.teamId ? "assigned" : "unassigned");
+          } else {
+            throw new Error(data.message || "Failed to authenticate.");
+          }
+        }} 
+      />
+    );
+  }
+
+  if (currentUser.role === 'member' && teamStatus !== 'assigned') {
+    return (
+      <PendingAssignmentView 
+        email={currentUser.email} 
+        onLogout={() => setCurrentUser(null)} 
+        onInviteAccepted={() => setTeamStatus('assigned')} 
+      />
+    );
+  }
+
   return (
     <TooltipProvider delayDuration={0}>
       <div className="dark h-screen w-full bg-background text-foreground font-sans overflow-hidden flex">
@@ -161,12 +240,12 @@ export default function App() {
             onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            teamMembers={teamMembers}
           />
 
-            {/* Right Panel: Main Interface */}
-            <div className="flex-1 bg-background flex flex-col min-h-0 w-full relative">
-              <div className="flex-1 flex flex-col relative overflow-hidden min-h-0">
-                {/* Header */}
+          {/* Right Panel: Main Interface */}
+          <div className="flex-1 bg-background flex flex-col min-h-0 w-full relative">
+            <div className="flex-1 flex flex-col relative overflow-hidden min-h-0">
                 <header className="flex h-11 items-center justify-between px-6 border-b border-border bg-background/50 backdrop-blur-sm sticky top-0 z-10 font-sans shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-widest">
@@ -182,18 +261,22 @@ export default function App() {
                     </div>
                     <Separator orientation="vertical" className="h-3 mx-1" />
                     <div className="flex -space-x-1.5">
-                      {MOCK_TEAM_CONTEXT.map(m => (
-                        <Avatar key={m.id} className="h-4 w-4 border border-background ring-1 ring-border">
-                          <AvatarImage src={m.avatar} />
+                      {teamMembers.map(m => (
+                        <Avatar key={m.id} className="h-10 w-10 border-2 border-background ring-2 ring-primary/20 hover:scale-110 transition-transform cursor-pointer" onClick={() => setActiveTab(`member-${m.id}`)}>
+                          <AvatarImage src={`https://api.dicebear.com/7.x/notionists/svg?seed=${m.email}`} />
                         </Avatar>
-                      ))}
-                    </div>
+                      ))}</div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2 px-2 py-0.5 rounded bg-muted/30 border border-border">
                        <div className="h-1.5 w-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]" />
                        <span className="text-[10px] font-mono text-muted-foreground uppercase">Sync_Ok</span>
                     </div>
+
+                    {currentUser.role === "lead" && (
+                      <InviteMemberDialog senderEmail={currentUser.email} />
+                    )}
+
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
@@ -216,6 +299,12 @@ export default function App() {
                       </TooltipTrigger>
                       <TooltipContent side="bottom">Push latest telemetry to Enterprise Cloud (D1)</TooltipContent>
                     </Tooltip>
+
+                    <Separator orientation="vertical" className="h-4 mx-1" />
+                    
+                    <button onClick={() => setCurrentUser(null)} className="text-muted-foreground hover:text-destructive flex items-center transition-colors" title="Disconnect">
+                      <LogOut className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </header>
 
@@ -437,15 +526,16 @@ export default function App() {
                       </div>
 
                       <div className="space-y-[1px] bg-border border border-border rounded-lg overflow-hidden shadow-lg">
-                        {MOCK_TEAM_CONTEXT.map((member) => (
+                        {teamMembers.map((member) => (
                           <motion.div
                             key={member.id}
-                            className="bg-background p-4 flex items-center gap-6 group hover:bg-muted/10 transition-colors relative"
+                            className="bg-background p-4 flex items-center gap-6 group hover:bg-muted/10 transition-colors relative cursor-pointer"
+                            onClick={() => setActiveTab(`member-${member.id}`)}
                           >
                             <div className="relative shrink-0">
                               <Avatar className="h-9 w-9 border border-border shadow-sm">
-                                <AvatarImage src={member.avatar} />
-                                <AvatarFallback>{member.name[0]}</AvatarFallback>
+                                <AvatarImage src={member.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${member.email}`} />
+                                <AvatarFallback>{(member.name || member.email)[0].toUpperCase()}</AvatarFallback>
                               </Avatar>
                               {member.isLive && (
                                 <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background animate-pulse" />
@@ -454,27 +544,27 @@ export default function App() {
 
                             <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                               <div className="space-y-0.5">
-                                <p className="text-xs font-bold text-foreground truncate">{member.name}</p>
-                                <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-tighter opacity-70">UID: 00{member.id}-SNTL</p>
+                                <p className="text-xs font-bold text-foreground truncate">{member.name || member.email.split('@')[0]}</p>
+                                <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-tighter opacity-70">UID: {member.id.substring(0, 8)}-SNTL</p>
                               </div>
 
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-2">
                                   <div className={cn(
                                     "h-1.5 w-1.5 rounded-full",
-                                    member.status === "Editing" ? "bg-blue-400" : "bg-green-400"
+                                    member.isLive ? "bg-green-400" : "bg-muted-foreground/30"
                                   )} />
-                                  <p className="text-[11px] font-medium uppercase tracking-tight">{member.status}</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-tight">{member.isLive ? 'Active' : 'Idle'}</p>
                                 </div>
                                 <code className="text-[10px] font-mono text-muted-foreground underline decoration-border underline-offset-4 truncate block">
-                                  {member.file}
+                                  {member.jobTitle || member.role}
                                 </code>
                               </div>
 
                               <div className="flex items-center gap-4 text-right justify-self-end">
                                 <div className="hidden md:block text-right">
                                   <p className="text-[9px] font-bold uppercase text-muted-foreground tracking-widest leading-none mb-1">Last Signal</p>
-                                  <p className="text-[10px] font-mono text-foreground/80">{member.time}</p>
+                                  <p className="text-[10px] font-mono text-foreground/80">JUST_NOW</p>
                                 </div>
                                 <button onClick={(e) => { e.stopPropagation(); setActiveTab(`member-${member.id}`); }} className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all">
                                   <Search className="h-3 w-3" />
@@ -625,7 +715,18 @@ export default function App() {
             )}
 
             {activeTab.startsWith("member-") && (
-              <MemberProfile member={MOCK_TEAM_CONTEXT.find(m => m.id === parseInt(activeTab.replace("member-", "")))!} />
+              <MemberProfile 
+                member={teamMembers.find(m => m.id === activeTab.replace("member-", "")) as any} 
+                isLead={currentUser?.role === 'lead'}
+                onRoleUpdate={async (userId, newRole) => {
+                  await fetch(`https://edge-api.kaushik0h0s.workers.dev/api/team/${encodeURIComponent(userId)}/role`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ jobTitle: newRole }),
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  // Optionally re-fetch team here
+                }}
+              />
             )}
 
             {activeTab !== "summary" && activeTab !== "chat" && !activeTab.startsWith("member-") && (
