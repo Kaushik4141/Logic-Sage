@@ -344,7 +344,10 @@ export default function App() {
       <PendingAssignmentView 
         email={currentUser.email} 
         onLogout={() => setCurrentUser(null)} 
-        onInviteAccepted={() => setTeamStatus('assigned')} 
+        onInviteAccepted={(teamId: string) => {
+          setTeamStatus('assigned');
+          setCurrentUser(prev => prev ? {...prev, teamId} : null);
+        }} 
       />
     );
   }
