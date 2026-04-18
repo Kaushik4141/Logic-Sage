@@ -303,7 +303,7 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
 
 app.get('/api/team-map', async (req: Request, res: Response): Promise<void> => {
   try {
-    const edgeApiUrl = process.env.EDGE_API_URL || 'http://127.0.0.1:8787';
+    const edgeApiUrl = process.env.EDGE_API_URL || 'https://edge-api.kaushik0h0s.workers.dev';
     let eventsData = null;
     try {
       // FIXED: Changed fetch URL from /api/events to /api/team-history
@@ -344,7 +344,13 @@ Return ONLY the Mermaid code block starting with 'graph TD'.`;
       });
     } catch (error) {
       console.error(`[Sentinel] Model llama3.1-8b failed.`, error);
-      res.status(500).json({ error: 'Failed to generate diagram from Cerebras' });
+      // Fallback diagram when Cerebras quota is exceeded
+      const fallbackDiagram = `graph TD
+    Client["Tauri Client"] --> EdgeAPI["Cloudflare Edge API"]
+    EdgeAPI --> D1["D1 Database"]
+    Client --> Backend["Local Node Backend"]
+    Backend --> Cerebras["Cerebras AI (Offline/Quota Exceeded)"]`;
+      res.json({ diagram: fallbackDiagram, isFallback: true });
       return;
     }
 
