@@ -6,7 +6,7 @@ const EDGE_API_URL = "https://edge-api.kaushik0h0s.workers.dev";
  * Reads the most recent local telemetry row and pushes it
  * to the Cloudflare Worker → D1 analytics table.
  */
-export async function syncTelemetryToCloud(): Promise<void> {
+export async function syncTelemetryToCloud(developerId: string): Promise<void> {
   try {
     const latest = await getLatestTelemetry();
 
@@ -25,10 +25,8 @@ export async function syncTelemetryToCloud(): Promise<void> {
       }
     }
 
-    const DEVELOPER_ID = "employee_001";
-
     const payload = {
-      developer_id: DEVELOPER_ID,
+      developer_id: developerId,
       branch: latest.branch,
       codeSnippets: snippets,
       timestamp: latest.createdAt,

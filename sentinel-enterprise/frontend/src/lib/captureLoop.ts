@@ -2,7 +2,7 @@ import { createTables, localTelemetry, localDrizzleDb, getLatestTelemetry } from
 import { getRecentCodeSnippets } from "./pieces";
 import { syncTelemetryToCloud } from "./cloudSync";
 
-export async function runLocalCapture(): Promise<void> {
+export async function runLocalCapture(developerId?: string): Promise<void> {
   try {
     await createTables();
 
@@ -33,12 +33,14 @@ export async function runLocalCapture(): Promise<void> {
 
     console.info("[Capture Loop] Telemetry saved to local_telemetry table");
 
-    // Automatically push to cloud directly after a local commit
-    try {
-      await syncTelemetryToCloud();
-      window.dispatchEvent(new CustomEvent('cloud-sync-success', { detail: { time: new Date() } }));
-    } catch (syncError) {
-      console.error("[Capture Loop] Background cloud sync failed:", syncError);
+    // Automatically push to cloud directly after a local commit if we have a developer identity
+    if (developerId) {
+      try {
+        await syncTelemetryToCloud(developerId);
+        window.dispatchEvent(new CustomEvent('cloud-sync-success', { detail: { time: new Date() } }));
+      } catch (syncError) {
+        console.error("[Capture Loop] Background cloud sync failed:", syncError);
+      }
     }
   } catch (error) {
     console.error("[Capture Loop] Error in runLocalCapture:", error);

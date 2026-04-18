@@ -155,7 +155,7 @@ export default function App() {
   useEffect(() => {
     const runCapture = async () => {
       try {
-        await runLocalCapture();
+        await runLocalCapture(currentUser?.id);
         console.info("[Capture Loop] Local capture written to sentinel-local.db");
       } catch (error) {
         console.error("[Capture Loop] Failed to run local capture", error);
@@ -168,7 +168,7 @@ export default function App() {
     }, 5 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const handleSyncSuccess = (e: Event) => {
@@ -218,10 +218,10 @@ export default function App() {
   }
 
   async function handleCloudSync() {
-    if (isSyncing) return;
+    if (isSyncing || !currentUser) return;
     setIsSyncing(true);
     try {
-      await syncTelemetryToCloud();
+      await syncTelemetryToCloud(currentUser.id);
       console.log("[Cloud Sync] Successfully pushed to Cloudflare D1");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
