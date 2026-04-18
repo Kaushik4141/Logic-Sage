@@ -8,7 +8,7 @@ type Invite = { id: string; senderEmail: string };
 type PendingAssignmentViewProps = {
   email: string;
   onLogout: () => void;
-  onInviteAccepted: () => void;
+  onInviteAccepted: (teamId: string) => void;
 };
 
 export function PendingAssignmentView({ email, onLogout, onInviteAccepted }: PendingAssignmentViewProps) {
@@ -44,6 +44,9 @@ export function PendingAssignmentView({ email, onLogout, onInviteAccepted }: Pen
     setIsAccepting(true);
     setError(null);
     try {
+      const invite = invites.find(i => i.id === inviteId);
+      if (!invite) throw new Error("Invite not found");
+
       const res = await fetch('https://edge-api.kaushik0h0s.workers.dev/api/invites/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,7 +55,7 @@ export function PendingAssignmentView({ email, onLogout, onInviteAccepted }: Pen
       const data = await res.json();
       if (data.status !== "success") throw new Error(data.message);
       
-      onInviteAccepted();
+      onInviteAccepted(invite.senderEmail);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setIsAccepting(false);
