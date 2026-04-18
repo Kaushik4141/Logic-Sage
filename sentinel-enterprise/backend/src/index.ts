@@ -501,6 +501,61 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
   }
 });
 
+// --- Phase 2: Predictive Knowledge Injection (Developer Blueprints) ---
+app.post('/api/blueprints/generate', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { branch_name, raw_telemetry } = req.body;
+
+    if (!branch_name || !raw_telemetry) {
+      res.status(400).json({ status: 'error', message: 'Missing branch_name or raw_telemetry' });
+      return;
+    }
+
+    // CRITICAL: ZeroLeak Scrubbing
+    const scrubbedTelemetry = scrubSensitiveText(raw_telemetry);
+
+    const systemPrompt = `You are a Principal Engineer. Read the provided execution telemetry and code context from a developer's environment.
+Generate a "Developer Blueprint" that summarizes what was built, fixed, or modified and why.
+
+CRITICAL: Return ONLY a raw JSON object with the following structure:
+{
+  "summary": "A concise 1-sentence summary of the architectural changes or fixes.",
+  "key_context": ["Token 1", "Token 2", "Token 3"]
+}
+Do not include any other text, markdown blocks, or labels.`;
+
+    const prompt = `Branch: ${branch_name}\nTelemetry:\n${scrubbedTelemetry}`;
+
+    const { text } = await generateText({
+      model: cerebras.chat(PRIMARY_MODEL),
+      system: systemPrompt,
+      prompt,
+    });
+
+    let blueprint;
+    try {
+      // Clean potential markdown artifacts if LLM doesn't follow instructions perfectly
+      const cleanedJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      blueprint = JSON.parse(cleanedJson);
+    } catch (parseError) {
+      console.warn('[Sentinel] Failed to parse Cerebras JSON output, using fallback formatting.', parseError);
+      blueprint = {
+        summary: text.split('\n')[0].substring(0, 150),
+        key_context: ["Context Extraction Failed"]
+      };
+    }
+
+    res.json({
+      status: 'success',
+      data: blueprint
+    });
+
+  } catch (error: any) {
+    console.error('Error in /api/blueprints/generate:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Blueprint generation failed' });
+  }
+});
+
 app.get('/api/team-map', async (req: Request, res: Response): Promise<void> => {
   try {
     const edgeApiUrl = process.env.EDGE_API_URL || 'https://edge-api.kaushik0h0s.workers.dev';

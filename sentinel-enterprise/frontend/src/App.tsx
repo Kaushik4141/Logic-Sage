@@ -38,6 +38,7 @@ import { Sidebar, TeamMember } from "@/components/Sidebar";
 import { LoginView } from "@/components/auth/LoginView";
 import { PendingAssignmentView } from "@/components/auth/PendingAssignmentView";
 import { InviteMemberDialog } from "@/components/ui/InviteMemberDialog";
+import { DocumentationTab } from "@/components/DocumentationTab";
 
 interface ChatMessage {
   id: number;
@@ -403,7 +404,7 @@ export default function App() {
           {/* Right Panel: Main Interface */}
           <div className="flex-1 bg-background flex flex-col min-h-0 w-full relative">
             <div className="flex-1 flex flex-col relative overflow-hidden min-h-0">
-                <header className="flex h-11 items-center justify-between px-6 border-b border-border bg-background/50 backdrop-blur-sm sticky top-0 z-10 font-sans shrink-0">
+                <header className="flex h-16 items-center justify-between px-6 border-b border-border bg-background/50 backdrop-blur-sm sticky top-0 z-10 font-sans shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-widest">
                        <LayoutGrid className="h-3 w-3" />
@@ -413,7 +414,7 @@ export default function App() {
                           "transition-colors",
                           activeTab === "summary" ? "text-foreground" : "text-muted-foreground"
                        )}>
-                          {activeTab === "summary" ? "Project_Manifest" : activeTab.toUpperCase()}
+                          {activeTab === "summary" ? "Project_Manifest" : activeTab === "documentation" ? "Knowledge_Base" : activeTab.toUpperCase()}
                        </span>
                     </div>
                     <Separator orientation="vertical" className="h-3 mx-1" />
@@ -425,10 +426,7 @@ export default function App() {
                       ))}</div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 px-2 py-0.5 rounded bg-muted/30 border border-border">
-                       <div className="h-1.5 w-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]" />
-                       <span className="text-[10px] font-mono text-muted-foreground uppercase">Sync_Ok</span>
-                    </div>
+                    
 
                     {currentUser.role === "lead" && (
                       <InviteMemberDialog senderEmail={currentUser.email} />
@@ -542,97 +540,7 @@ export default function App() {
                       </p>
 
                       <TeamMapViewer />
-
-                      <div className="pt-8 relative">
-                        {/* Professional Technical Schematic */}
-                        <div className="flex flex-col items-center">
-                          {/* Step 1: Access Tier */}
-                          <div className="w-full max-w-2xl bg-muted/20 border border-border rounded-lg p-6 relative">
-                            <div className="absolute -top-3 left-4 px-2 bg-background border border-border rounded text-[10px] font-mono uppercase tracking-tight text-foreground/70">Layer_01 // External_Access</div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className="border border-border bg-background p-3 rounded flex items-center gap-3">
-                                <Globe className="h-4 w-4 text-muted-foreground" />
-                                <div className="space-y-0.5">
-                                  <p className="text-[10px] font-bold uppercase tracking-tight">Web_Endpoint</p>
-                                  <p className="text-[9px] text-muted-foreground">HTTPS/WSS Protocol</p>
-                                </div>
-                              </div>
-                              <div className="border border-border bg-background p-3 rounded flex items-center gap-3 opacity-50">
-                                <Globe className="h-4 w-4 text-muted-foreground" />
-                                <div className="space-y-0.5">
-                                  <p className="text-[10px] font-bold uppercase tracking-tight">API_Gateway</p>
-                                  <p className="text-[9px] text-muted-foreground">REST Integration</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Connector Line 1 */}
-                          <div className="h-10 w-px bg-border flex items-center justify-center">
-                            <div className="bg-background border border-border px-2 py-0.5 rounded text-[8px] font-mono text-muted-foreground uppercase">Request_Flow</div>
-                          </div>
-
-                          {/* Step 2: Identity Layer */}
-                          <div className="w-full max-w-2xl bg-muted/20 border border-border rounded-lg p-6 relative">
-                            <div className="absolute -top-3 left-4 px-2 bg-background border border-border rounded text-[10px] font-mono uppercase tracking-tight text-foreground/70">Layer_02 // Security_&_Identity</div>
-                            <div className="grid grid-cols-3 gap-3">
-                              {[
-                                { t: "OAuth_Service", d: "Identity Verification" },
-                                { t: "JWT_Validator", d: "Session Management" },
-                                { t: "RBAC_Engine", d: "Permission Scoping" }
-                              ].map((item, i) => (
-                                <div key={i} className="border border-border bg-background p-3 rounded group hover:border-foreground/20 transition-colors">
-                                  <Shield className="h-3.5 w-3.5 mb-2 text-muted-foreground" />
-                                  <p className="text-[10px] font-bold uppercase tracking-tight">{item.t}</p>
-                                  <p className="text-[9px] text-muted-foreground">{item.d}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Connector Line 2 */}
-                          <div className="h-10 w-px bg-border flex items-center justify-center">
-                            <div className="bg-background border border-border px-2 py-0.5 rounded text-[8px] font-mono text-muted-foreground uppercase">Validated_Pipe</div>
-                          </div>
-
-                          {/* Step 3: Application Core */}
-                          <div className="w-full max-w-2xl bg-muted/30 border-2 border-border rounded-lg p-8 relative">
-                            <div className="absolute -top-3 left-4 px-2 bg-background border border-border rounded text-[10px] font-mono uppercase tracking-tight text-foreground font-semibold">Layer_03 // Application_Orchestrator</div>
-                            <div className="flex flex-col gap-6">
-                              <div className="grid grid-cols-2 gap-6">
-                                <div className="border border-border bg-background p-4 rounded-md space-y-2">
-                                  <div className="flex items-center gap-2 border-b border-border pb-2 mb-2">
-                                    <Terminal className="h-3.5 w-3.5 text-primary" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">State_Manager</span>
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                                    Handles complex state transitions and reactive updates across the node cluster.
-                                  </p>
-                                </div>
-                                <div className="border border-border bg-background p-4 rounded-md space-y-2">
-                                  <div className="flex items-center gap-2 border-b border-border pb-2 mb-2">
-                                    <Layers className="h-3.5 w-3.5 text-primary" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Sync_Engine</span>
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                                    Synchronizes internal manifests with physical cloud resources in real-time.
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="bg-background border border-dashed border-border p-4 rounded-md flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <Server className="h-4 w-4 text-muted-foreground" />
-                                  <div className="space-y-0.5">
-                                    <p className="text-[10px] font-bold uppercase tracking-tight">Primary_Data_Sink</p>
-                                    <p className="text-[9px] text-muted-foreground font-mono">POSTGRESQL // PERSISTENCE_LAYER</p>
-                                  </div>
-                                </div>
-                                <Badge variant="outline" className="text-[8px] h-4 font-mono">STABLE</Badge>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+      
                     </section>
 
                     {/* 03: LIVE TASK TRACKER (Dynamic from D1) */}
@@ -1019,7 +927,9 @@ export default function App() {
               />
             )}
 
-            {activeTab !== "summary" && activeTab !== "chat" && !activeTab.startsWith("member-") && (
+            {activeTab === "documentation" && <DocumentationTab />}
+
+            {activeTab !== "summary" && activeTab !== "chat" && activeTab !== "documentation" && !activeTab.startsWith("member-") && (
               /* Fallback View for other modules */
               <div className="flex-1 flex flex-col items-center justify-center p-12 bg-background min-h-0 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
