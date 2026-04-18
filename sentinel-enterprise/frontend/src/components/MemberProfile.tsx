@@ -6,15 +6,27 @@ import {
   Loader2,
   Terminal,
   BadgeInfo,
-  Activity
+  Activity,
+  GitBranch,
+  Clock,
+  Code2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
+
+export interface TelemetryEntry {
+  id: number;
+  developer_id: string;
+  branch: string;
+  code_snippets: string | null;
+  timestamp: string;
+  created_at: string;
+}
 
 interface MemberProfileProps {
   member: {
@@ -37,10 +49,81 @@ interface MemberProfileProps {
   onRoleUpdate?: (userId: string, newRole: string) => Promise<void>;
 }
 
+function parseSnippets(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String);
+    return [String(parsed)];
+  } catch {
+    return raw ? [raw] : [];
+  }
+}
+
+function formatTimestamp(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return ts;
+  }
+}
+
+function timeSince(ts: string): string {
+  try {
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  } catch {
+    return "–";
+  }
+}
+
 export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfileProps) {
   const [isEditingRole, setIsEditingRole] = useState(false);
   const [newRole, setNewRole] = useState(member?.jobTitle || member?.role || "");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [telemetry, setTelemetry] = useState<TelemetryEntry[]>([]);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
+  // Fetch telemetry for this member
+  useEffect(() => {
+    if (!member?.id) return;
+    let mounted = true;
+    const fetchTelemetry = async () => {
+      setTelemetryLoading(true);
+      try {
+        const res = await fetch(
+          `https://edge-api.kaushik0h0s.workers.dev/api/history/${encodeURIComponent(member.id)}`
+        );
+        const json = await res.json();
+        if (mounted && json.status === "success") {
+          setTelemetry(json.data ?? []);
+        }
+      } catch (err) {
+        console.error("[MemberProfile] Failed to fetch telemetry", err);
+      } finally {
+        if (mounted) setTelemetryLoading(false);
+      }
+    };
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 10000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [member?.id]);
 
   if (!member) {
     return (
@@ -67,6 +150,8 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
   const displayName = member.name || member.email.split('@')[0];
   const displayAvatar = member.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${member.email}`;
   const displayRole = member.jobTitle || member.role;
+
+  const latestEntry = telemetry[0];
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background min-h-0 font-sans border-l border-border">
@@ -95,7 +180,7 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
             <div className="space-y-4 flex-1">
               <div className="space-y-1">
                 <div className="flex items-center gap-3">
-                  <h1 className="text-4xl font-bold tracking-tight text-foreground uppercase tracking-wider">{displayName}</h1>
+                  <h1 className="text-4xl font-bold tracking-tight text-foreground uppercase">{displayName}</h1>
                   <Badge variant="outline" className="text-[10px] uppercase tracking-widest bg-muted/30 border-border/50 font-mono py-0.5">
                     UID::{member.id.substring(0, 8)}
                   </Badge>
@@ -151,16 +236,20 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
                 <Separator orientation="vertical" className="h-10 hidden md:block" />
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
-                    <Activity className="h-3 w-3" /> System Uptime
+                    <Activity className="h-3 w-3" /> Last Sync
                   </span>
-                  <span className="text-xs font-mono text-blue-400">{member.uptime || '04:12:33'}</span>
+                  <span className="text-xs font-mono text-blue-400">
+                    {latestEntry ? timeSince(latestEntry.timestamp) : '–'}
+                  </span>
                 </div>
                 <Separator orientation="vertical" className="h-10 hidden md:block" />
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
-                    <BadgeInfo className="h-3 w-3" /> Security Clearance
+                    <BadgeInfo className="h-3 w-3" /> Telemetry Entries
                   </span>
-                  <Badge variant="outline" className="text-[9px] font-bold uppercase border-green-500/30 text-green-500 bg-green-500/5">Level_04</Badge>
+                  <Badge variant="outline" className="text-[9px] font-bold uppercase border-green-500/30 text-green-500 bg-green-500/5">
+                    {telemetry.length} record{telemetry.length !== 1 ? 's' : ''}
+                  </Badge>
                 </div>
               </div>
             </div>
@@ -168,45 +257,75 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
 
           <Separator className="bg-border/50" />
 
-          {/* Detailed Activity Docs */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-4">
-             <section className="space-y-6">
-                <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground flex items-center gap-2 border-b border-border pb-3">
-                  <Signal className="h-3.5 w-3.5" /> Live_Telemetry_Buffer
-                </h3>
-                <div className="space-y-6 text-sm text-muted-foreground font-sans leading-relaxed">
-                  <div className="p-4 rounded-xl bg-muted/10 border border-border space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-mono uppercase tracking-widest">Active_Path</span>
-                      <span className="text-[10px] font-mono text-primary uppercase">{member.branch || 'MAIN'}</span>
-                    </div>
-                    <code className="block text-xs text-foreground bg-background p-2 rounded border border-border font-mono truncate">
-                      {member.file || 'sentinel/core/identity.ts'}
-                    </code>
-                  </div>
-                  <p className="opacity-80">
-                    Operator heartbeat detected in the <span className="text-foreground font-semibold">{member.department || 'CORE'}</span> cluster. Telemetry indicates constant stream activity with zero packet loss in current session cycles.
-                  </p>
-                </div>
-             </section>
+          {/* Telemetry Section */}
+          <div className="space-y-8">
+            <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground flex items-center gap-2 border-b border-border pb-3">
+              <Signal className="h-3.5 w-3.5" /> Live_Telemetry_Buffer
+              {telemetryLoading && <Loader2 className="h-3 w-3 animate-spin ml-auto text-primary" />}
+            </h3>
 
-             <section className="space-y-6">
-               <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground flex items-center gap-2 border-b border-border pb-3">
-                 <Terminal className="h-3.5 w-3.5" /> Assignment_Stack
-               </h3>
-               <div className="space-y-3">
-                 {(member.tasks || ["Initialize RBAC Handshake", "Audit D1 Migration", "Sync Telemetry Buffers"]).map((task, idx) => (
-                    <div key={idx} className="flex items-start gap-4 p-4 rounded-xl bg-muted/5 border border-border/40 hover:border-primary/20 transition-colors group">
-                       <div className="h-6 w-6 rounded bg-background border border-border flex items-center justify-center text-[10px] font-mono group-hover:border-primary/30 group-hover:text-primary transition-colors">
-                         {idx + 1}
-                       </div>
-                       <p className="text-[13px] text-muted-foreground group-hover:text-foreground transition-colors py-0.5">
-                         {task}
-                       </p>
+            {telemetry.length === 0 && !telemetryLoading && (
+              <div className="flex flex-col items-center justify-center py-16 space-y-4 text-center">
+                <div className="p-4 rounded-2xl bg-muted/10 border border-border">
+                  <Signal className="h-8 w-8 text-muted-foreground/30" />
+                </div>
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">No telemetry data for this operator yet.</p>
+                <p className="text-[11px] text-muted-foreground/60 max-w-sm">
+                  Telemetry will appear here once this member pushes code context to the Sentinel cloud.
+                </p>
+              </div>
+            )}
+
+            {telemetry.map((entry, idx) => {
+              const snippets = parseSnippets(entry.code_snippets);
+              return (
+                <motion.div
+                  key={entry.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  className="rounded-xl border border-border bg-muted/5 overflow-hidden"
+                >
+                  {/* Entry Header */}
+                  <div className="flex items-center gap-3 px-5 py-3 bg-muted/10 border-b border-border/50">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <GitBranch className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span className="text-[11px] font-mono font-bold text-primary truncate">{entry.branch}</span>
                     </div>
-                 ))}
-               </div>
-             </section>
+                    <div className="flex items-center gap-4 text-[10px] text-muted-foreground shrink-0">
+                      <span className="flex items-center gap-1.5 font-mono">
+                        <Clock className="h-3 w-3" />
+                        {formatTimestamp(entry.timestamp)}
+                      </span>
+                      <Badge variant="outline" className="text-[9px] font-mono border-border/50 py-0">
+                        #{entry.id}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {/* Code Snippets */}
+                  <div className="p-5 space-y-3">
+                    {snippets.length > 0 ? (
+                      snippets.map((snippet, sIdx) => (
+                        <div key={sIdx} className="rounded-lg bg-background border border-border/60 overflow-hidden">
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/20 border-b border-border/40">
+                            <Code2 className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
+                              Snippet {sIdx + 1}
+                            </span>
+                          </div>
+                          <pre className="p-3 text-[11px] font-mono text-foreground/85 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
+                            {snippet}
+                          </pre>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No code snippets in this telemetry entry.</p>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       </ScrollArea>

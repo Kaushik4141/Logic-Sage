@@ -242,7 +242,7 @@ async function handlePostLogin(request: Request, env: Env, cors: Record<string, 
         email,
         password,
         role,
-        teamId: role === "lead" ? crypto.randomUUID() : null
+        teamId: role === "lead" ? email : null
       }).returning();
     } else if (user.password !== password) {
       return json({ status: "error", message: "Invalid credentials." }, 401, cors);
@@ -290,8 +290,11 @@ async function handleAcceptInvite(request: Request, env: Env, cors: Record<strin
     // 2. Assign member to the sender's team and propagate the jobTitle
     const [invite] = await db.select().from(invitations).where(eq(invitations.id, rawBody.inviteId));
     if (invite) {
+      // Look up the sender's teamId so the member joins the same team
+      const [sender] = await db.select().from(users).where(eq(users.email, invite.senderEmail));
+      const senderTeamId = sender?.teamId ?? invite.senderEmail;
       await db.update(users).set({ 
-        teamId: invite.senderEmail, // Using senderEmail as a proxy for teamId in this demo
+        teamId: senderTeamId,
         jobTitle: invite.jobTitle ?? undefined
       }).where(eq(users.email, rawBody.userEmail));
     }
