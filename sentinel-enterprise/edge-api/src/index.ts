@@ -334,7 +334,7 @@ export default {
       // --- /api/events ---
       if (url.pathname === "/api/events" && request.method === "GET") {
         const stmt = env.DB.prepare(
-          "SELECT * FROM enterprise_events ORDER BY id DESC LIMIT 20"
+          "SELECT * FROM telemetry ORDER BY id DESC LIMIT 20"
         );
         const { results } = await stmt.all();
         return json({ status: "success", data: results }, 200, cors);
@@ -343,7 +343,7 @@ export default {
       // NEW ROUTE: Fetch the whole team's history for the Architecture Map
       if (url.pathname === "/api/team-history" && request.method === "GET") {
         const stmt = env.DB.prepare(
-          "SELECT * FROM enterprise_events ORDER BY id DESC LIMIT 20"
+          "SELECT * FROM telemetry ORDER BY id DESC LIMIT 20"
         );
         const { results } = await stmt.all();
         return json({ status: "success", data: results }, 200, cors);
