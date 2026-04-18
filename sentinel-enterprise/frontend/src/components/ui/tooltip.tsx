@@ -1,64 +1,158 @@
-import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
+import * as React from "react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
-function TooltipProvider({
-  delay = 0,
-  ...props
-}: TooltipPrimitive.Provider.Props) {
+type TooltipContextValue = {
+  open: boolean;
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+};
+
+const TooltipContext = React.createContext<TooltipContextValue | null>(null);
+
+function useTooltipContext() {
+  const context = React.useContext(TooltipContext);
+
+  if (!context) {
+    throw new Error("Tooltip components must be used within <Tooltip>.");
+  }
+
+  return context;
+}
+
+function TooltipProvider({ children }: { children: React.ReactNode; delayDuration?: number }) {
+  return <>{children}</>;
+}
+
+function Tooltip({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+
   return (
-    <TooltipPrimitive.Provider
-      data-slot="tooltip-provider"
-      delay={delay}
+    <TooltipContext.Provider value={{ open, setOpen }}>
+      <span
+        className="relative inline-flex"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+      >
+        {children}
+      </span>
+    </TooltipContext.Provider>
+  );
+}
+
+type TooltipTriggerProps = React.HTMLAttributes<HTMLElement> & {
+  asChild?: boolean;
+  children?: React.ReactNode;
+  [key: string]: unknown;
+};
+
+function TooltipTrigger({ asChild, children, ...props }: TooltipTriggerProps) {
+  const { setOpen } = useTooltipContext();
+
+  if (asChild && React.isValidElement(children)) {
+    const childProps = (children.props ?? {}) as Record<string, unknown>;
+
+    return React.cloneElement(children as React.ReactElement<any>, {
+      ...childProps,
+      ...props,
+      onMouseEnter: (event: React.MouseEvent<HTMLElement>) => {
+        setOpen(true);
+        props.onMouseEnter?.(event);
+        (childProps.onMouseEnter as ((event: React.MouseEvent<HTMLElement>) => void) | undefined)?.(event);
+      },
+      onMouseLeave: (event: React.MouseEvent<HTMLElement>) => {
+        setOpen(false);
+        props.onMouseLeave?.(event);
+        (childProps.onMouseLeave as ((event: React.MouseEvent<HTMLElement>) => void) | undefined)?.(event);
+      },
+      onFocus: (event: React.FocusEvent<HTMLElement>) => {
+        setOpen(true);
+        props.onFocus?.(event);
+        (childProps.onFocus as ((event: React.FocusEvent<HTMLElement>) => void) | undefined)?.(event);
+      },
+      onBlur: (event: React.FocusEvent<HTMLElement>) => {
+        setOpen(false);
+        props.onBlur?.(event);
+        (childProps.onBlur as ((event: React.FocusEvent<HTMLElement>) => void) | undefined)?.(event);
+      },
+    });
+  }
+
+  return (
+    <span
       {...props}
-    />
-  )
+      onMouseEnter={(event) => {
+        setOpen(true);
+        props.onMouseEnter?.(event);
+      }}
+      onMouseLeave={(event) => {
+        setOpen(false);
+        props.onMouseLeave?.(event);
+      }}
+      onFocus={(event) => {
+        setOpen(true);
+        props.onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        setOpen(false);
+        props.onBlur?.(event);
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-}
-
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
-}
+type TooltipContentProps = React.HTMLAttributes<HTMLSpanElement> & {
+  side?: "top" | "bottom" | "left" | "right";
+  sideOffset?: number;
+  [key: string]: unknown;
+};
 
 function TooltipContent({
   className,
-  side = "top",
-  sideOffset = 4,
-  align = "center",
-  alignOffset = 0,
   children,
+  side = "top",
+  sideOffset = 8,
+  align,
   ...props
-}: TooltipPrimitive.Popup.Props &
-  Pick<
-    TooltipPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
-  >) {
+}: TooltipContentProps) {
+  const { open } = useTooltipContext();
+  void align;
+
+  const sideClasses =
+    side === "bottom"
+      ? "left-1/2 top-full -translate-x-1/2"
+      : side === "left"
+        ? "right-full top-1/2 -translate-y-1/2"
+        : side === "right"
+          ? "left-full top-1/2 -translate-y-1/2"
+          : "bottom-full left-1/2 -translate-x-1/2";
+
+  const spacingStyle =
+    side === "bottom"
+      ? { marginTop: sideOffset }
+      : side === "left"
+        ? { marginRight: sideOffset }
+        : side === "right"
+          ? { marginLeft: sideOffset }
+          : { marginBottom: sideOffset };
+
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Positioner
-        align={align}
-        alignOffset={alignOffset}
-        side={side}
-        sideOffset={sideOffset}
-        className="isolate z-50"
-      >
-        <TooltipPrimitive.Popup
-          data-slot="tooltip-content"
-          className={cn(
-            "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-            className
-          )}
-          {...props}
-        >
-          {children}
-          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground data-[side=bottom]:top-1 data-[side=inline-end]:top-1/2! data-[side=inline-end]:-left-1 data-[side=inline-end]:-translate-y-1/2 data-[side=inline-start]:top-1/2! data-[side=inline-start]:-right-1 data-[side=inline-start]:-translate-y-1/2 data-[side=left]:top-1/2! data-[side=left]:-right-1 data-[side=left]:-translate-y-1/2 data-[side=right]:top-1/2! data-[side=right]:-left-1 data-[side=right]:-translate-y-1/2 data-[side=top]:-bottom-2.5" />
-        </TooltipPrimitive.Popup>
-      </TooltipPrimitive.Positioner>
-    </TooltipPrimitive.Portal>
-  )
+    <span
+      {...props}
+      style={spacingStyle}
+      className={cn(
+        "pointer-events-none absolute z-50 rounded-md border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md transition-opacity",
+        sideClasses,
+        open ? "opacity-100" : "opacity-0",
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

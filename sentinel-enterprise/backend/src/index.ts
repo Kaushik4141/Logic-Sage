@@ -1,11 +1,25 @@
+import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { generateText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
-import dotenv from 'dotenv';
 import webhookRouter from './webhookrouter.js';
+import { piecesRAG, type RagReference } from './lib/pieces-rag.js';
+import { getRecentCodeSnippets } from './lib/pieces.js';
 
-dotenv.config();
+const REDACTED = '[REDACTED_BY_SENTINEL]';
+
+function scrubSensitiveText(rawText: string | null | undefined): string {
+  if (!rawText) return '';
+
+  let scrubbed = rawText;
+  scrubbed = scrubbed.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED);
+  scrubbed = scrubbed.replace(/\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, REDACTED);
+  scrubbed = scrubbed.replace(/\b(Bearer\s+)([a-zA-Z0-9\-._~+/]+=*)/gi, `$1${REDACTED}`);
+  scrubbed = scrubbed.replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, REDACTED);
+  scrubbed = scrubbed.replace(/\/Users\/[^\s/]+/g, REDACTED);
+  return scrubbed;
+}
 
 // --- Cerebras AI Provider ---
 const cerebras = createOpenAI({
@@ -19,6 +33,32 @@ const port = 3000;
 // FIXED: Added hyphens to model names to match Cerebras API spec
 const PRIMARY_MODEL = process.env.CEREBRAS_PRIMARY_MODEL || 'llama3.1-8b';
 const FALLBACK_MODEL = process.env.CEREBRAS_FALLBACK_MODEL || 'llama3.1-8b';
+
+// --- RAG Initialization ---
+async function initRAG() {
+  try {
+    console.log("🚀 [Sentinel] Initialising Pieces RAG...");
+    const piecesData = await getRecentCodeSnippets();
+    await piecesRAG.index(piecesData);
+    console.log("✅ [Sentinel] RAG ready");
+  } catch (err) {
+    console.error("❌ [Sentinel] RAG init failed:", err);
+  }
+}
+
+initRAG();
+
+// Auto-refresh RAG every 5 minutes
+setInterval(async () => {
+  try {
+    const data = await getRecentCodeSnippets();
+    if (data) {
+      await piecesRAG.addContext(data);
+    }
+  } catch (err) {
+    console.error("[Sentinel] Auto-refresh RAG failed:", err);
+  }
+}, 5 * 60 * 1000);
 
 // --- Middleware ---
 const DEFAULT_ORIGINS = 'http://localhost:1420,tauri://localhost,https://tauri.localhost';
@@ -53,6 +93,7 @@ interface CollaborateRequest {
 interface CollaborateSuccessResponse {
   status: 'success';
   text: string;
+  references?: RagReference[];
 }
 
 interface CollaborateErrorResponse {
@@ -79,39 +120,46 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
   try {
     const { user_query, local_context, branch } = req.body as CollaborateRequest;
 
-    if (!user_query || !local_context) {
-      res.status(400).json({ status: 'error', message: 'Missing user_query or local_context' });
+    if (!user_query && !req.body.query && !req.body.userMessage) {
+      res.status(400).json({ status: 'error', message: 'Missing user_query' });
       return;
     }
 
-    const prompt = `Branch: ${branch ?? 'unknown'}\nUser Query: ${user_query}\n\nLocal Context:\n${JSON.stringify(local_context, null, 2)}`;
-
-    let result;
-    try {
-      result = await generateText({
-        model: cerebras.chat(PRIMARY_MODEL),
-        system: SENTINEL_SYSTEM_PROMPT,
-        prompt,
-      });
-    } catch (primaryError) {
-      console.warn(`[Sentinel] Primary model (${PRIMARY_MODEL}) failed — attempting fallback.`, primaryError);
-      try {
-        result = await generateText({
-          model: cerebras.chat(FALLBACK_MODEL),
-          system: SENTINEL_SYSTEM_PROMPT,
-          prompt,
-        });
-      } catch (fallbackError) {
-        console.error(`[Sentinel] Fallback model (${FALLBACK_MODEL}) also failed.`, { primaryError, fallbackError });
-        throw fallbackError;
-      }
+    const question = user_query ?? req.body.query ?? req.body.userMessage ?? "";
+    
+    // Condense local context to prevent massive payloads from blowing up the token limit
+    let condensedContext = "";
+    if (local_context) {
+      const rawContext = scrubSensitiveText(JSON.stringify(local_context, null, 2));
+      condensedContext = rawContext.length > 10000 ? rawContext.substring(0, 10000) + "... (truncated)" : rawContext;
     }
 
-    res.json({ status: 'success', text: result.text });
-  } catch (error) {
+    const augmentedQuery = `Branch: ${branch ?? 'unknown'}\nLocal Context:\n${condensedContext}\n\nUser Query: ${question}`;
+
+    // Pieces context drives both the answer and the supporting references.
+    const { text, references } = await piecesRAG.ask(question, augmentedQuery);
+
+    res.json({ status: 'success', text, references });
+  } catch (error: any) {
     console.error('Error in /api/collaborate:', error);
-    res.status(500).json({ status: 'error', message: 'Internal server error' });
+    res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
   }
+});
+
+// --- RAG Utility Endpoints ---
+app.post('/api/rag/update', async (req: Request, res: Response): Promise<void> => {
+  const { data } = req.body;
+  if (!data) {
+    res.status(400).json({ status: 'error', message: 'No data provided' } as any);
+    return;
+  }
+
+  await piecesRAG.addContext(data);
+  res.json({ ok: true, status: piecesRAG.status() } as any);
+});
+
+app.get('/api/rag/status', (_req: Request, res: Response): void => {
+  res.json(piecesRAG.status() as any);
 });
 
 app.post('/api/developer-brief/:username', async (req: Request, res: Response): Promise<void> => {

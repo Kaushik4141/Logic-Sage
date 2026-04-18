@@ -144,85 +144,114 @@ export async function getRecentCodeSnippets(): Promise<string[]> {
       })
       .slice(0, 5);
 
-    // ── Phase 2 + 3: Deep-fetch each summary, then fetch annotations by UUID ──
-    const contextBlocks = await Promise.all(
-      sorted.map(async (lightSummary) => {
-        let title = lightSummary.name?.trim() || "Uncategorized Activity";
-        let timestamp = lightSummary.updated?.readable ?? lightSummary.created?.readable ?? "";
-        let detailedText = "";
-        let tagLine = "";
+    // Global dedup: track annotation IDs + text we've already seen across summaries
+    const seenAnnotationIds = new Set<string>();
+    const seenTexts = new Set<string>();
 
-        try {
-          // Phase 2: Get the summary with its indices maps
-          const deep = await summaryApi.workstreamSummariesSpecificWorkstreamSummarySnapshot({
-            workstreamSummary: lightSummary.id,
-            transferables: true,
-          });
+    // ── Phase 2 + 3: Deep-fetch each summary sequentially to enforce deduplication ──
+    // We use a for...of loop instead of Promise.all to prevent race conditions 
+    // where multiple summaries check the seenAnnotationIds Set at the same time.
+    const formatTime = (s: any) => {
+      const val = s?.updated?.value ?? s?.created?.value;
+      try {
+        return val ? new Date(val).toLocaleString() : "";
+      } catch {
+        return "";
+      }
+    };
 
-          if (deep.name?.trim()) title = deep.name.trim();
-          timestamp = deep.updated?.readable ?? deep.created?.readable ?? timestamp;
+    const contextBlocks: string[] = [];
+    for (const lightSummary of sorted) {
+      let title = lightSummary.name?.trim() || "Uncategorized Activity";
+      let timestamp = formatTime(lightSummary);
+      let detailedText = "";
+      let tagLine = "";
 
-          // Extract tag text — try iterable first, then fall back to indices
-          const tags = (deep.tags?.iterable ?? [])
-            .map((tag) => (tag as any).text?.trim())
-            .filter(Boolean);
-          if (tags.length > 0) tagLine = `Tags: ${tags.join(", ")}`;
+      try {
+        // Phase 2: Get the summary with its indices maps
+        const deep = await summaryApi.workstreamSummariesSpecificWorkstreamSummarySnapshot({
+          workstreamSummary: lightSummary.id,
+          transferables: true,
+        });
 
-          // Phase 3: Fetch annotations by UUID from the indices map
-          // The indices map has { annotationUUID: indexNumber }
-          const annotationIds = Object.keys(deep.annotations?.indices ?? {});
+        if (deep.name?.trim()) title = deep.name.trim();
+        const deepTime = formatTime(deep);
+        if (deepTime) timestamp = deepTime;
 
-          if (annotationIds.length > 0) {
-            console.log(`[Sentinel WPE] Fetching ${annotationIds.length} annotations for "${title}"`);
+        // Extract tag text — try iterable first, then fall back to indices
+        const tags = (deep.tags?.iterable ?? [])
+          .map((tag) => (tag as any).text?.trim())
+          .filter(Boolean);
+        if (tags.length > 0) tagLine = `Tags: ${tags.join(", ")}`;
 
-            // Fetch up to 3 annotations in parallel
-            const annotationResults = await Promise.all(
-              annotationIds.slice(0, 3).map(async (annId) => {
-                try {
-                  const fullAnnotation = await annotationApi.annotationSpecificAnnotationSnapshot({
-                    annotation: annId,
-                  });
-                  return fullAnnotation.text || null;
-                } catch {
-                  console.warn(`[Sentinel WPE] Could not fetch annotation ${annId}`);
-                  return null;
-                }
-              }),
-            );
+        // Phase 3: Fetch annotations by UUID from the indices map
+        // Skip any annotation IDs we've already fetched for a previous summary
+        const allAnnotationIds = Object.keys(deep.annotations?.indices ?? {});
+        const newAnnotationIds = allAnnotationIds.filter((id) => !seenAnnotationIds.has(id));
 
-            const texts = annotationResults.filter((t): t is string => Boolean(t));
-            if (texts.length > 0) {
-              detailedText = texts.join("\n\n");
-            }
+        // Mark them as seen immediately so subsequent summaries don't fetch them
+        for (const id of newAnnotationIds) seenAnnotationIds.add(id);
 
-            console.log(`[Sentinel WPE] Deep summary "${title}":`, {
-              annotationIdsFound: annotationIds.length,
-              textsExtracted: texts.length,
-              hasText: detailedText.length > 0,
-              preview: detailedText.substring(0, 80),
+        if (newAnnotationIds.length > 0) {
+          console.log(`[Sentinel WPE] Fetching ${newAnnotationIds.length} new annotations for "${title}" (${allAnnotationIds.length - newAnnotationIds.length} skipped as dupes)`);
+
+          // Fetch up to 3 NEW annotations in parallel
+          const annotationResults = await Promise.all(
+            newAnnotationIds.slice(0, 3).map(async (annId) => {
+              try {
+                const fullAnnotation = await annotationApi.annotationSpecificAnnotationSnapshot({
+                  annotation: annId,
+                });
+                return fullAnnotation.text || null;
+              } catch {
+                console.warn(`[Sentinel WPE] Could not fetch annotation ${annId}`);
+                return null;
+              }
+            }),
+          );
+
+          // Filter out nulls + text we've already seen in a previous summary
+          const texts = annotationResults
+            .filter((t): t is string => Boolean(t))
+            .filter((t) => {
+              if (seenTexts.has(t)) return false;
+              seenTexts.add(t);
+              return true;
             });
+
+          if (texts.length > 0) {
+            detailedText = texts.join("\n\n");
           }
-        } catch (deepErr) {
-          console.warn(`[Sentinel WPE] Could not deep-fetch summary ${lightSummary.id}:`, deepErr);
+
+          console.log(`[Sentinel WPE] Deep summary "${title}":`, {
+            annotationIdsFound: allAnnotationIds.length,
+            newFetched: newAnnotationIds.length,
+            uniqueTexts: texts.length,
+            hasText: detailedText.length > 0,
+            preview: detailedText.substring(0, 80),
+          });
         }
+      } catch (deepErr) {
+        console.warn(`[Sentinel WPE] Could not deep-fetch summary ${lightSummary.id}:`, deepErr);
+      }
 
-        if (!detailedText) {
-          detailedText = "Continuous telemetry tracked by Pieces OS Pattern Engine.";
-        }
+      if (!detailedText) {
+        detailedText = "Continuous telemetry tracked by Pieces OS Pattern Engine.";
+      }
 
-        // ── Assemble Block ──
-        const lines = [
-          `--- LIVE WORKSTREAM CONTEXT: ${title} ---`,
-          timestamp ? `Timestamp: ${timestamp}` : "",
-          tagLine,
-          "",
-          detailedText,
-          "-----------------------------------------------",
-        ].filter((l) => l !== "");
+      // ── Assemble Block ──
+      const lines = [
+        `--- LIVE WORKSTREAM CONTEXT: ${title} ---`,
+        `Summary ID: ${lightSummary.id}`,
+        timestamp ? `Timestamp: ${timestamp}` : "",
+        tagLine,
+        "",
+        detailedText,
+        "-----------------------------------------------",
+      ].filter((l) => l !== "");
 
-        return "\n" + lines.join("\n") + "\n";
-      }),
-    );
+      contextBlocks.push("\n" + lines.join("\n") + "\n");
+    }
 
     console.log("[Sentinel WPE] Context blocks built:", contextBlocks.length);
     return contextBlocks;
