@@ -2,7 +2,8 @@ import {
   Users,
   LayoutGrid,
   PanelLeft,
-  ChevronLeft
+  ChevronLeft,
+  Terminal
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../lib/utils";
@@ -77,7 +78,22 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
             </div>
 
             <div className="mt-auto pt-4 flex flex-col gap-5 items-center w-full pb-4">
-              
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => onTabChange("chat")}
+                    className={cn(
+                      "h-10 w-10 rounded-xl flex items-center justify-center transition-all shadow-sm",
+                      activeTab === "chat"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-[#1e1e1e] text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                    )}
+                  >
+                    <Terminal className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Team CLI</TooltipContent>
+              </Tooltip>
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -169,6 +185,16 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange }: Sideb
                   >
                     <LayoutGrid className="h-4 w-4 shrink-0" />
                     <span className="font-semibold">Overview</span>
+                  </button>
+                  <button
+                    onClick={() => onTabChange("chat")}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2 text-xs rounded-lg transition-all group",
+                      activeTab === "chat" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Terminal className="h-4 w-4 shrink-0" />
+                    <span className="font-semibold">Team CLI</span>
                   </button>
 
                 </nav>
