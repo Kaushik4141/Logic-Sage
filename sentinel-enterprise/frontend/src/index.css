@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
 
 @custom-variant dark (&:is(.dark *));
 
@@ -149,45 +150,60 @@ button,
 td,
 th {
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
-  font-size: 15px !important;
-  line-height: 1.6 !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
+  /* Removed !important from text properties to allow component-level overrides */
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* Allow structural headings to maintain their size hierarchy while stripping tracking/casing */
 h1 {
-  font-size: 24px !important;
+  font-size: 24px;
   font-weight: 600 !important;
   color: #ffffff !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
-  margin-bottom: 0.5rem !important;
+  letter-spacing: normal;
+  text-transform: none;
+  margin-bottom: 0.5rem;
 }
 
 h2 {
-  font-size: 20px !important;
+  font-size: 20px;
   font-weight: 600 !important;
   color: #ffffff !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
-  margin-bottom: 0.5rem !important;
+  letter-spacing: normal;
+  text-transform: none;
+  margin-bottom: 0.5rem;
 }
 
 h3,
 h4,
 h5,
 h6 {
-  font-size: 16px !important;
+  font-size: 16px;
   font-weight: 600 !important;
   color: #ffffff !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
-  margin-bottom: 0.5rem !important;
+  letter-spacing: normal;
+  text-transform: none;
+  margin-bottom: 0.5rem;
 }
 
 /* Keep icon sizing unaffected by the global override */
 svg,
 svg * {
   font-size: inherit !important;
+}
+
+.font-orbitron {
+  font-family: 'Orbitron', sans-serif !important;
+}
+
+/* Scrollbar Hide Utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
