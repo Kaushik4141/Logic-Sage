@@ -40,6 +40,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { MemberProfile } from "@/components/MemberProfile";
+import { TeamMapViewer } from "@/components/TeamMapViewer";
 
 const MOCK_TEAM_CONTEXT = [
   { id: 1, name: "David", role: "Backend Engineer", department: "Architecture", status: "Editing", file: "src/api/auth.ts", time: "Just now", isLive: true, avatar: "https://github.com/shadcn.png", branch: "feature/auth-refactor", uptime: "04:12:33", tasks: ["Implement OAuth2 providers", "Secure session tokens", "DB migration scripts"] },
@@ -466,6 +467,8 @@ export default function App() {
                             <p className="text-[13px] text-muted-foreground leading-relaxed font-sans max-w-3xl">
                                System architecture is the high-level conceptual model that defines the structure, behaviour, and views of a system. It serves as a master blueprint, outlining how hardware and software components, interfaces, and security layers work together to meet specific business and technical goals.
                             </p>
+
+                            <TeamMapViewer />
 
                             <div className="pt-8 relative">
                                {/* Professional Technical Schematic */}

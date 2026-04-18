@@ -230,6 +230,24 @@ export default {
         }
       }
 
+      // --- /api/events ---
+      if (url.pathname === "/api/events" && request.method === "GET") {
+        const stmt = env.DB.prepare(
+          "SELECT * FROM enterprise_events ORDER BY id DESC LIMIT 20"
+        );
+        const { results } = await stmt.all();
+        return json({ status: "success", data: results }, 200, cors);
+      }
+
+      // NEW ROUTE: Fetch the whole team's history for the Architecture Map
+      if (url.pathname === "/api/team-history" && request.method === "GET") {
+        const stmt = env.DB.prepare(
+          "SELECT * FROM enterprise_events ORDER BY id DESC LIMIT 20"
+        );
+        const { results } = await stmt.all();
+        return json({ status: "success", data: results }, 200, cors);
+      }
+
       // --- /api/history/:username ---
       const historyMatch = url.pathname.match(/^\/api\/history\/([^/]+)$/);
       if (historyMatch && request.method === "GET") {

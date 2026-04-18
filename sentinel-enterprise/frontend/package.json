@@ -24,6 +24,7 @@
     "class-variance-authority": "^0.7.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.8.0",
+    "mermaid": "^11.14.0",
     "motion": "^12.38.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
