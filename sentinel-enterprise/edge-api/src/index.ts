@@ -18,6 +18,16 @@ interface Env {
   CEREBRAS_API_KEY?: string;
 }
 
+interface ScheduledEvent {
+  scheduledTime: number;
+  cron: string;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
 type BlueprintRequestBody = {
   id?: string;
   ticket_id: string;
@@ -386,6 +396,32 @@ async function handleGetTeamTasks(teamId: string, env: Env, cors: Record<string,
   }
 }
 
+async function handleGetTeamTelemetry(teamId: string, env: Env, cors: Record<string, string>): Promise<Response> {
+  const db = drizzle(env.DB);
+  try {
+    const members = await db.select().from(users).where(eq(users.teamId, teamId));
+    if (members.length === 0) {
+      return json({ status: "success", data: [] }, 200, cors);
+    }
+
+    const memberIds = new Set(members.map((member) => member.id));
+    const memberById = new Map(members.map((member) => [member.id, member]));
+    const allTelemetry = await db.select().from(telemetry).orderBy(desc(telemetry.timestamp)).limit(100);
+
+    const teamTelemetry = allTelemetry
+      .filter((entry) => memberIds.has(entry.developerId))
+      .slice(0, 30)
+      .map((entry) => ({
+        ...entry,
+        member: memberById.get(entry.developerId) ?? null,
+      }));
+
+    return json({ status: "success", data: teamTelemetry }, 200, cors);
+  } catch (error) {
+    return json({ status: "error", message: String(error) }, 500, cors);
+  }
+}
+
 // --- Manifest Handlers ---
 
 async function handleGetManifest(env: Env, cors: Record<string, string>): Promise<Response> {
@@ -547,6 +583,12 @@ export default {
         const db = drizzle(env.DB);
         const members = await db.select().from(users).where(eq(users.teamId, teamId));
         return json({ status: "success", data: members }, 200, cors);
+      }
+
+      const teamTelemetryMatch = url.pathname.match(/^\/api\/team-history\/([^/]+)$/);
+      if (teamTelemetryMatch && request.method === "GET") {
+        const teamId = decodeURIComponent(teamTelemetryMatch[1]);
+        return await handleGetTeamTelemetry(teamId, env, cors);
       }
 
       const roleMatch = url.pathname.match(/^\/api\/team\/([^/]+)\/role$/);

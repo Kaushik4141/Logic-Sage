@@ -1,11 +1,11 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
-import { generateText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
 import webhookRouter from './webhookrouter.js';
 import { piecesRAG, type RagReference } from './lib/pieces-rag.js';
 import { getRecentCodeSnippets } from './lib/pieces.js';
+import { generateTextSafe } from './lib/ai-provider.js';
+
 
 const REDACTED = '[REDACTED_BY_SENTINEL]';
 
@@ -21,11 +21,7 @@ function scrubSensitiveText(rawText: string | null | undefined): string {
   return scrubbed;
 }
 
-// --- Cerebras AI Provider ---
-const cerebras = createOpenAI({
-  baseURL: 'https://api.cerebras.ai/v1',
-  apiKey: process.env.CEREBRAS_API_KEY || '',
-});
+// --- AI Provider initialization is now handled in lib/ai-provider.ts ---
 
 const app = express();
 const port = 3000;
@@ -138,9 +134,13 @@ app.use('/', webhookRouter);
 // --- Type Definitions ---
 interface CollaborateRequest {
   user_query: string;
+  mode?: 'team_overview' | 'member_profile';
+  team_id?: string;
   local_context: {
     error_log?: string;
     teammate_recent_code?: string;
+    developer_id?: string;
+    developer_name?: string;
     [key: string]: unknown;
   };
   branch?: string;
@@ -158,6 +158,20 @@ interface CollaborateErrorResponse {
 }
 
 type CollaborateResponse = CollaborateSuccessResponse | CollaborateErrorResponse;
+
+interface CloudTelemetryRecord {
+  developer_id?: string;
+  branch?: string;
+  code_snippets?: string | null;
+  timestamp?: string;
+  member?: {
+    id?: string;
+    email?: string;
+    role?: string;
+    teamId?: string | null;
+    jobTitle?: string | null;
+  } | null;
+}
 
 function sanitizeBriefText(raw: string | null | undefined): string {
   if (!raw) return '';
@@ -235,6 +249,162 @@ function normalizeRouteParam(value: string | string[] | undefined, fallback: str
   return value ?? fallback;
 }
 
+function parseSnippetArray(rawValue: unknown): string[] {
+  if (typeof rawValue !== 'string' || !rawValue.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item)).filter(Boolean);
+    }
+    return [String(parsed)];
+  } catch {
+    return [rawValue];
+  }
+}
+
+function buildCloudContextText(records: CloudTelemetryRecord[], scope: 'team' | 'member'): string {
+  return records
+    .map((record, index) => {
+      const label =
+        record.member?.email ??
+        record.member?.id ??
+        record.developer_id ??
+        `developer-${index + 1}`;
+      const snippets = parseSnippetArray(record.code_snippets)
+        .map((snippet) => scrubSensitiveText(snippet))
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('\n');
+
+      return [
+        `Developer: ${label}`,
+        `Scope: ${scope}`,
+        `Branch: ${record.branch ?? 'unknown'}`,
+        `Timestamp: ${record.timestamp ?? 'unknown'}`,
+        snippets || 'No synced code snippets available.',
+      ].join('\n');
+    })
+    .join('\n-----------------------------------------------\n');
+}
+
+async function fetchCloudContext(
+  mode: 'team_overview' | 'member_profile',
+  teamId: string | undefined,
+  developerId: string | undefined,
+): Promise<{ records: CloudTelemetryRecord[]; text: string }> {
+  const edgeApiUrl = process.env.EDGE_API_URL || 'http://127.0.0.1:8787';
+
+  try {
+    let targetUrl = '';
+    let scope: 'team' | 'member' = 'member';
+
+    if (mode === 'member_profile' && developerId) {
+      targetUrl = `${edgeApiUrl}/api/history/${encodeURIComponent(developerId)}`;
+      scope = 'member';
+    } else if (mode === 'team_overview' && teamId) {
+      targetUrl = `${edgeApiUrl}/api/team-history/${encodeURIComponent(teamId)}`;
+      scope = 'team';
+    } else {
+      return { records: [], text: '' };
+    }
+
+    const response = await fetch(targetUrl);
+    if (!response.ok) {
+      console.warn(`[Sentinel] Cloud context endpoint returned ${response.status} for ${targetUrl}`);
+      return { records: [], text: '' };
+    }
+
+    const payload = (await response.json()) as { data?: CloudTelemetryRecord[] };
+    const records = Array.isArray(payload.data) ? payload.data : [];
+    return {
+      records,
+      text: buildCloudContextText(records, scope),
+    };
+  } catch (error) {
+    console.warn('[Sentinel] Failed to fetch cloud context:', error);
+    return { records: [], text: '' };
+  }
+}
+
+function buildCollaboratePrompt(
+  mode: 'team_overview' | 'member_profile',
+  question: string,
+  branch: string,
+  cloudContext: string,
+  localContext: string,
+  ragContext?: string,
+): string {
+  const ragSection = ragContext ? `\nPieces RAG context (semantic match from local workstream index):\n${ragContext}` : '';
+
+  if (mode === 'member_profile') {
+    return `You are Sentinel. Answer only about this one developer based on the synced cloud telemetry below.
+
+Your job:
+- explain what this person has been working on
+- explain what kind of role or ownership they seem to have
+- mention current focus only as supporting detail
+- do not answer with the whole team story unless the user explicitly asks for it
+- if the context is thin, say what is missing clearly
+
+Cloud developer context:
+${cloudContext || 'No cloud developer context available.'}
+
+Local supporting context:
+${localContext || 'No local context available.'}${ragSection}
+
+Branch: ${branch}
+User question: ${question}
+
+Answer in plain text.`;
+  }
+
+  return `You are Sentinel. Answer at the whole-team and overall-project level using the synced cloud telemetry below.
+
+Your job:
+- explain what is happening overall across the team
+- synthesize recent branches, workstreams, and code activity into one coherent story
+- do not collapse into a single developer unless the user explicitly asks
+- if the context is thin, say what is missing clearly
+
+Cloud team context:
+${cloudContext || 'No cloud team context available.'}
+
+Local supporting context:
+${localContext || 'No local context available.'}${ragSection}
+
+Branch: ${branch}
+User question: ${question}
+
+Answer in plain text.`;
+}
+
+function buildCollaborateFallback(
+  mode: 'team_overview' | 'member_profile',
+  cloudContext: string,
+): string {
+  const summary = cloudContext
+    .split('\n')
+    .map((line) => sanitizeBriefText(line))
+    .filter(Boolean)
+    .filter((line) => !/^developer:/i.test(line))
+    .filter((line) => !/^scope:/i.test(line))
+    .filter((line) => !/^branch:/i.test(line))
+    .filter((line) => !/^timestamp:/i.test(line))
+    .slice(0, 5)
+    .join(' ');
+
+  if (!summary) {
+    return mode === 'member_profile'
+      ? 'I could not find enough synced cloud telemetry for this developer yet.'
+      : 'I could not find enough synced cloud telemetry for this team yet.';
+  }
+
+  return mode === 'member_profile'
+    ? `From this developer's synced cloud context, their recent work appears to center on ${summary}`
+    : `From the team's synced cloud context, the overall story is ${summary}`;
+}
+
 // --- Sentinel System Prompt ---
 const SENTINEL_SYSTEM_PROMPT = `You are Sentinel, an enterprise context router. Use the uncommitted teammate code provided in the context to explain why the user's app is breaking.
 
@@ -250,7 +420,7 @@ Rules:
 // --- Routes ---
 app.post('/api/collaborate', async (req: Request, res: Response<CollaborateResponse>): Promise<void> => {
   try {
-    const { user_query, local_context, branch } = req.body as CollaborateRequest;
+    const { user_query, local_context, branch, mode, team_id } = req.body as CollaborateRequest;
 
     if (!user_query && !req.body.query && !req.body.userMessage) {
       res.status(400).json({ status: 'error', message: 'Missing user_query' });
@@ -258,6 +428,7 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
     }
 
     const question = user_query ?? req.body.query ?? req.body.userMessage ?? "";
+    const effectiveMode = mode ?? 'team_overview';
     
     // Condense local context to prevent massive payloads from blowing up the token limit
     // Cerebras llama3.1-8b has an 8K token limit; RAG adds ~2K of its own context
@@ -267,12 +438,48 @@ app.post('/api/collaborate', async (req: Request, res: Response<CollaborateRespo
       condensedContext = rawContext.length > 3000 ? rawContext.substring(0, 3000) + "... (truncated)" : rawContext;
     }
 
-    const augmentedQuery = `Branch: ${branch ?? 'unknown'}\nLocal Context:\n${condensedContext}\n\nUser Query: ${question}`;
+    const developerId =
+      typeof local_context?.developer_id === 'string' ? local_context.developer_id : undefined;
+    const { text: cloudContextText } = await fetchCloudContext(
+      effectiveMode,
+      team_id,
+      developerId,
+    );
 
-    // Pieces context drives both the answer and the supporting references.
-    const { text, references } = await piecesRAG.ask(question, augmentedQuery);
+    const ragChunks = await piecesRAG.retrieve(question, 5);
+    const ragContext = ragChunks.length > 0
+      ? ragChunks.map((c, i) => `[${i + 1}] ${scrubSensitiveText(c.content)}`).join('\n\n')
+      : undefined;
 
-    res.json({ status: 'success', text, references });
+    const prompt = buildCollaboratePrompt(
+      effectiveMode,
+      question,
+      branch ?? 'unknown',
+      cloudContextText,
+      condensedContext,
+      ragContext,
+    );
+
+    try {
+      const result = await generateTextSafe({
+        prompt,
+      });
+
+      res.json({
+        status: 'success',
+        text: sanitizeBriefText(result.text) || buildCollaborateFallback(effectiveMode, cloudContextText),
+        references: [],
+      });
+      return;
+    } catch (modelError) {
+      console.warn('[Sentinel] Cloud collaborate generation failed, falling back to deterministic summary.', modelError);
+      res.json({
+        status: 'success',
+        text: buildCollaborateFallback(effectiveMode, cloudContextText),
+        references: [],
+      });
+      return;
+    }
   } catch (error: any) {
     console.error('Error in /api/collaborate:', error);
     res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
@@ -335,26 +542,17 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
 
     let result;
     try {
-      result = await generateText({
-        model: cerebras.chat(PRIMARY_MODEL),
+      result = await generateTextSafe({
         system: systemPrompt,
         prompt,
       });
-    } catch (primaryError) {
-      console.warn(`[Sentinel] Primary model (${PRIMARY_MODEL}) failed — attempting fallback.`, primaryError);
-      try {
-        result = await generateText({
-          model: cerebras.chat(FALLBACK_MODEL),
-          system: systemPrompt,
-          prompt,
-        });
-      } catch (fallbackError) {
-        console.error(`[Sentinel] Fallback model (${FALLBACK_MODEL}) also failed.`, { primaryError, fallbackError });
-        result = {
-          text: buildDeveloperBriefFallback(username, local_context as Record<string, unknown>, historyData),
-        };
-      }
+    } catch (modelError) {
+      console.error(`[Sentinel] All AI models failed for developer brief.`, modelError);
+      result = {
+        text: buildDeveloperBriefFallback(username, local_context as Record<string, unknown>, historyData),
+      };
     }
+
 
     res.json({ status: 'success', brief: sanitizeBriefText(result.text) });
   } catch (error) {
@@ -392,7 +590,7 @@ app.post('/api/developer-depth/:username', async (req: Request, res: Response): 
       console.warn(`[Sentinel] Depth: failed to fetch history for ${username}:`, err);
     }
 
-    // 2. Condense local context + history to fit Cerebras 8K token limit
+    // 2. Condense local context + history to fit token limits
     //    RAG adds ~2K of its own context chunks, so we cap inputs to ~3K total
     const rawLocalContext = scrubSensitiveText(
       JSON.stringify(local_context ?? {}, null, 2)
@@ -441,17 +639,16 @@ Be thorough but concise. Use markdown formatting for readability.`;
     } catch (ragError) {
       console.warn('[Sentinel] Depth: RAG pipeline failed, falling back to direct generation:', ragError);
 
-      // Fallback: direct Cerebras call without RAG retrieval
+      // Fallback: multi-provider call without RAG retrieval
       try {
-        const directResult = await generateText({
-          model: cerebras.chat(PRIMARY_MODEL),
+        const directResult = await generateTextSafe({
           system: depthSystemPrompt,
           prompt: augmentedQuery,
         });
         text = directResult.text ?? `No detailed explanation could be generated for "${phrase}".`;
       } catch (directError) {
-        console.error('[Sentinel] Depth: direct generation also failed:', directError);
-        text = `Unable to generate explanation for "${phrase}". Both the RAG pipeline and direct AI generation encountered errors.`;
+        console.error('[Sentinel] Depth: all AI providers failed:', directError);
+        text = `Unable to generate explanation for "${phrase}". The RAG pipeline and all AI providers encountered errors.`;
       }
     }
 
@@ -459,6 +656,60 @@ Be thorough but concise. Use markdown formatting for readability.`;
   } catch (error: any) {
     console.error('Error in /api/developer-depth:', error);
     res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
+  }
+});
+
+// --- Phase 2: Predictive Knowledge Injection (Developer Blueprints) ---
+app.post('/api/blueprints/generate', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { branch_name, raw_telemetry } = req.body;
+
+    if (!branch_name || !raw_telemetry) {
+      res.status(400).json({ status: 'error', message: 'Missing branch_name or raw_telemetry' });
+      return;
+    }
+
+    // CRITICAL: ZeroLeak Scrubbing
+    const scrubbedTelemetry = scrubSensitiveText(raw_telemetry);
+
+    const systemPrompt = `You are a Principal Engineer. Read the provided execution telemetry and code context from a developer's environment.
+Generate a "Developer Blueprint" that summarizes what was built, fixed, or modified and why.
+
+CRITICAL: Return ONLY a raw JSON object with the following structure:
+{
+  "summary": "A concise 1-sentence summary of the architectural changes or fixes.",
+  "key_context": ["Token 1", "Token 2", "Token 3"]
+}
+Do not include any other text, markdown blocks, or labels.`;
+
+    const prompt = `Branch: ${branch_name}\nTelemetry:\n${scrubbedTelemetry}`;
+
+    const { text } = await generateTextSafe({
+      system: systemPrompt,
+      prompt,
+    });
+
+    let blueprint;
+    try {
+      // Clean potential markdown artifacts if LLM doesn't follow instructions perfectly
+      const cleanedJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      blueprint = JSON.parse(cleanedJson);
+    } catch (parseError) {
+      console.warn('[Sentinel] Failed to parse AI JSON output, using fallback formatting.', parseError);
+      blueprint = {
+        summary: text.split('\n')[0].substring(0, 150),
+        key_context: ["Context Extraction Failed"]
+      };
+    }
+
+    res.json({
+      status: 'success',
+      data: blueprint
+    });
+
+  } catch (error: any) {
+    console.error('Error in /api/blueprints/generate:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Blueprint generation failed' });
   }
 });
 
@@ -503,19 +754,18 @@ CRITICAL MERMAID SYNTAX RULES:
 Return ONLY the Mermaid code block starting with 'graph TD'.`;
     let result;
     try {
-      result = await generateText({
-        model: cerebras.chat(PRIMARY_MODEL),
+      result = await generateTextSafe({
         system: systemPrompt,
         prompt,
       });
     } catch (error) {
-      console.error(`[Sentinel] Model ${PRIMARY_MODEL} failed for team-map.`, error);
-      // Fallback diagram when Cerebras quota is exceeded
+      console.error(`[Sentinel] All AI models failed for team map.`, error);
+      // Fallback diagram when all models fail
       const fallbackDiagram = `graph TD
     Client["Tauri Client"] --> EdgeAPI["Cloudflare Edge API"]
     EdgeAPI --> D1["D1 Database"]
     Client --> Backend["Local Node Backend"]
-    Backend --> Cerebras["Cerebras AI (Offline/Quota Exceeded)"]`;
+    Backend --> AI["AI Service (Offline/All Providers Failed)"]`;
       res.json({ diagram: fallbackDiagram, isFallback: true });
       return;
     }

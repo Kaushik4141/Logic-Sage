@@ -13,6 +13,7 @@ import { Document } from "@langchain/core/documents";
 import { Embeddings } from "@langchain/core/embeddings";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { generateTextSafe } from "./ai-provider.js";
 import * as fs from "fs";
 
 // ─────────────────────────────────────────────
@@ -181,8 +182,7 @@ ${JSON.stringify(
 )}`;
 
   try {
-    const result = await generateText({
-      model: cerebras.chat(process.env.CEREBRAS_PRIMARY_MODEL ?? "llama3.1-8b"),
+    const result = await generateTextSafe({
       prompt,
     });
 
@@ -375,11 +375,7 @@ export class PiecesRAG {
 
   constructor() {
     this.embeddings = new LocalEmbeddings();
-    // Re-use your existing Cerebras OpenAI-compat provider
-    this.cerebras = createOpenAI({
-      baseURL: "https://api.cerebras.ai/v1",
-      apiKey: process.env.CEREBRAS_API_KEY ?? "",
-    });
+    // AI Provider initialization is now handled in ai-provider.ts
   }
 
   /**
@@ -548,10 +544,7 @@ ${safeQuery}
 
 Answer:`;
 
-    const result = await generateText({
-      model: this.cerebras.chat(
-        process.env.CEREBRAS_PRIMARY_MODEL ?? "llama3.1-8b"
-      ),
+    const result = await generateTextSafe({
       prompt,
     });
 

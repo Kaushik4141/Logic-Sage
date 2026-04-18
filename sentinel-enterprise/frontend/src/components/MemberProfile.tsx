@@ -338,14 +338,17 @@ export function MemberProfile({ member, isLead, onRoleUpdate }: MemberProfilePro
   );
   const latestContext = useMemo(
     () => ({
+      developer_id: memberRecord.id,
+      developer_name: displayName,
       error_log: latestEntry
         ? `Latest telemetry recorded ${formatTimestamp(latestEntry.timestamp)} on branch ${latestEntry.branch}.`
         : "No recent telemetry available.",
       teammate_recent_code:
         normalizeSnippetText(latestSnippets) || "No recent code snippet available from Pieces OS.",
     }),
-    [latestEntry, latestSnippets],
+    [memberRecord.id, displayName, latestEntry, latestSnippets],
   );
+  
   const snippetMetadata = useMemo(
     () => extractSnippetMetadata(latestSnippets),
     [latestSnippets],
