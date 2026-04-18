@@ -16,6 +16,7 @@ export type NewBlueprint = typeof blueprints.$inferInsert;
 
 export const telemetry = sqliteTable("telemetry", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  developerId: text("developer_id").notNull(),
   branch: text("branch").notNull(),
   codeSnippets: text("code_snippets"),
   timestamp: text("timestamp").notNull(),

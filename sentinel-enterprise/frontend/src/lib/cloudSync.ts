@@ -1,6 +1,6 @@
 import { getLatestTelemetry } from "./localDb";
 
-const EDGE_API_URL = "http://localhost:8787";
+const EDGE_API_URL = "https://edge-api.kaushik0h0s.workers.dev";
 
 /**
  * Reads the most recent local telemetry row and pushes it
@@ -25,13 +25,17 @@ export async function syncTelemetryToCloud(): Promise<void> {
       }
     }
 
+    const DEVELOPER_ID = "employee_001";
+
     const payload = {
+      developer_id: DEVELOPER_ID,
       branch: latest.branch,
       codeSnippets: snippets,
       timestamp: latest.createdAt,
     };
 
     console.info("[Cloud Sync] Pushing telemetry to edge:", {
+      developer: payload.developer_id,
       branch: payload.branch,
       snippetCount: snippets.length,
       timestamp: payload.timestamp,

@@ -4,6 +4,5 @@ compatibility_date = "2026-04-17"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "sentinel-enterprise"
+database_name = "logicsage"
 database_id = "2c721d4e-f884-488e-a123-1f0b89f1b23c"
-preview_database_id = "2c721d4e-f884-488e-a123-1f0b89f1b23c"

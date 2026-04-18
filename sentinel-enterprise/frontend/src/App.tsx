@@ -60,6 +60,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [lastPushedAt, setLastPushedAt] = useState<Date | null>(null);
 
   // Auto-scroll to bottom when new messages appear
   useEffect(() => {
@@ -91,6 +92,17 @@ export default function App() {
     }, 5 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const handleSyncSuccess = (e: Event) => {
+      const customEvent = e as CustomEvent<{ time: Date }>;
+      if (customEvent.detail?.time) {
+        setLastPushedAt(customEvent.detail.time);
+      }
+    };
+    window.addEventListener('cloud-sync-success', handleSyncSuccess);
+    return () => window.removeEventListener('cloud-sync-success', handleSyncSuccess);
   }, []);
 
   async function handleForceSync() {
@@ -160,9 +172,12 @@ export default function App() {
     setIsSyncing(true);
     try {
       await syncTelemetryToCloud();
+      setLastPushedAt(new Date());
       console.log("[Cloud Sync] Successfully pushed to Cloudflare D1");
     } catch (error) {
-      console.error("[Cloud Sync] Push failed:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[Cloud Sync] Push failed:", errorMessage);
+      alert(`Sentinel Sync Failed:\n\n${errorMessage}`);
     } finally {
       setIsSyncing(false);
     }
@@ -366,9 +381,16 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 px-2 py-0.5 rounded bg-muted/30 border border-border">
-                       <div className="h-1.5 w-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]" />
-                       <span className="text-[10px] font-mono text-muted-foreground uppercase">Sync_Ok</span>
+                    <div className="flex items-center gap-3 px-3 py-1 rounded bg-muted/30 border border-border">
+                       <div className="flex items-center gap-2">
+                         <div className="h-1.5 w-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]" />
+                         <span className="text-[10px] font-mono text-muted-foreground uppercase">Sync_Ok</span>
+                       </div>
+                       {lastPushedAt && (
+                         <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline-block border-l border-border/50 pl-3">
+                           Pushed: {lastPushedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                         </span>
+                       )}
                     </div>
                     <button onClick={handleForceSync} className="text-muted-foreground hover:text-foreground transition-all" title="Force Sync">
                       <MoreVertical className="h-3.5 w-3.5" />
