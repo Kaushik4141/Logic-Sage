@@ -1,8 +1,6 @@
 import { 
   Signal, 
-  MoreVertical, 
-  FileCode, 
-  Terminal 
+  MoreVertical 
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";

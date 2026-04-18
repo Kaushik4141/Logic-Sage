@@ -3,6 +3,7 @@ import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
 import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
 import { askSentinelAI } from "./lib/api";
+import { syncTelemetryToCloud } from "./lib/cloudSync";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -30,11 +31,11 @@ import {
   FileCode,
   Layers,
   Code2,
-  Activity,
   Send,
   Paperclip,
   Smile,
-  Command
+  Command,
+  CloudUpload
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Keyboard shortcut for search
   useEffect(() => {
@@ -165,6 +167,19 @@ export default function App() {
       setChatHistory((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleCloudSync() {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await syncTelemetryToCloud();
+      console.log("[Cloud Sync] Successfully pushed to Cloudflare D1");
+    } catch (error) {
+      console.error("[Cloud Sync] Push failed:", error);
+    } finally {
+      setIsSyncing(false);
     }
   }
 
@@ -681,6 +696,30 @@ export default function App() {
                     >
                       Reset to Manifest
                     </button>
+                    <Separator orientation="vertical" className="h-4" />
+                    <Tooltip>
+                      {/* @ts-expect-error - asChild type issue with Radix */}
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => void handleCloudSync()}
+                          disabled={isSyncing}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-tight transition-all border",
+                            isSyncing
+                              ? "border-primary/30 bg-primary/10 text-primary cursor-wait"
+                              : "border-border bg-muted/30 text-muted-foreground hover:bg-primary/10 hover:text-primary hover:border-primary/30"
+                          )}
+                        >
+                          {isSyncing ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <CloudUpload className="h-3 w-3" />
+                          )}
+                          <span className="hidden sm:inline">{isSyncing ? "Pushing..." : "Push to Cloud"}</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Push latest telemetry to Enterprise Cloud (D1)</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               </div>

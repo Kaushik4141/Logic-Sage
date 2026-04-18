@@ -1,10 +1,10 @@
 import {
-  AssetsApi,
-  type Asset,
+  AnnotationApi,
   Configuration,
   WellKnownApi,
   WorkstreamSummariesApi,
   type WorkstreamSummary,
+  WorkstreamSummaryApi,
 } from "@pieces.app/pieces-os-client";
 
 const PIECES_OS_BASE_URL = "http://localhost:39300";
@@ -72,38 +72,6 @@ function toMillis(value: unknown): number {
   return 0;
 }
 
-function getAssetRecency(asset: Asset): number {
-  const interacted = toMillis(asset.interacted?.value);
-  const updated = toMillis(asset.updated?.value);
-  const created = toMillis(asset.created?.value);
-  return Math.max(interacted, updated, created);
-}
-
-function isCodeAsset(asset: Asset): boolean {
-  return (asset.formats?.iterable ?? []).some(
-    (format) => format.classification?.generic === "CODE",
-  );
-}
-
-function extractRawTextFromAsset(asset: Asset): string | null {
-  const formats = asset.formats?.iterable ?? [];
-
-  for (const format of formats) {
-    const raw =
-      format.fragment?.string?.raw ??
-      format.file?.string?.raw;
-
-    if (typeof raw === "string") {
-      const trimmed = raw.trim();
-      if (trimmed.length > 0) {
-        return trimmed;
-      }
-    }
-  }
-
-  return null;
-}
-
 function extractSummaryText(summary: WorkstreamSummary | undefined): string | null {
   if (!summary) {
     return null;
@@ -111,7 +79,7 @@ function extractSummaryText(summary: WorkstreamSummary | undefined): string | nu
 
   const annotationText =
     summary.annotations?.iterable
-      ?.map((annotation) => annotation.reference?.text?.trim())
+      ?.map((annotation) => (annotation as any).text?.trim() ?? annotation.reference?.text?.trim())
       .filter((text): text is string => Boolean(text)) ?? [];
 
   if (annotationText.length > 0) {
@@ -135,53 +103,135 @@ function condenseText(text: string | null | undefined, maxLength = 2_000): strin
   return `${normalized.slice(0, maxLength)}...`;
 }
 
-export async function getRecentCodeSnippets(limit = 5): Promise<string[]> {
-  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 5;
-  const assetsApi = new AssetsApi(createPiecesConfig());
+/**
+ * Fetches the most recent workstream summaries from Pieces OS.
+ *
+ * Strategy (three-phase):
+ *  1. Lightweight snapshot — get 1500+ summaries, sort, pick top 5.
+ *  2. Per-summary deep fetch — get the summary with its annotation UUIDs
+ *     from the `annotations.indices` map and tag UUIDs from `tags.indices`.
+ *  3. Per-annotation fetch — use AnnotationApi to fetch each annotation by
+ *     UUID, which returns the full Annotation model with `.text` directly.
+ */
+export async function getRecentCodeSnippets(): Promise<string[]> {
+  const config = createPiecesConfig();
+  const summariesApi = new WorkstreamSummariesApi(config);
+  const summaryApi = new WorkstreamSummaryApi(config);
+  const annotationApi = new AnnotationApi(config);
 
   try {
-    const assets = await assetsApi.assetsSnapshot({ transferables: true });
-    const iterable = assets?.iterable ?? [];
+    // ── Phase 1: Lightweight snapshot ──
+    const workstreamData = await summariesApi.workstreamSummariesSnapshot({
+      transferables: false,
+    });
+    const summaries = workstreamData?.iterable ?? [];
 
-    console.log("Total assets found in Pieces:", iterable.length);
+    console.log("[Sentinel WPE] Total Workstream Summaries found:", summaries.length);
 
-    if (iterable.length === 0) {
-      return [];
+    if (summaries.length === 0) {
+      return ["No active workflow context found for this developer."];
     }
 
-    // Sort ALL assets newest-first — no classification filter
-    const sorted = [...iterable].sort(
-      (a, b) => getAssetRecency(b) - getAssetRecency(a),
+    // Sort newest-first, take top 5
+    const sorted = [...summaries]
+      .sort((a, b) => {
+        const t = (s?: { value?: Date | string | number }) => {
+          if (!s?.value) return 0;
+          const d = new Date(s.value);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+        return (t(b.updated) || t(b.created)) - (t(a.updated) || t(a.created));
+      })
+      .slice(0, 5);
+
+    // ── Phase 2 + 3: Deep-fetch each summary, then fetch annotations by UUID ──
+    const contextBlocks = await Promise.all(
+      sorted.map(async (lightSummary) => {
+        let title = lightSummary.name?.trim() || "Uncategorized Activity";
+        let timestamp = lightSummary.updated?.readable ?? lightSummary.created?.readable ?? "";
+        let detailedText = "";
+        let tagLine = "";
+
+        try {
+          // Phase 2: Get the summary with its indices maps
+          const deep = await summaryApi.workstreamSummariesSpecificWorkstreamSummarySnapshot({
+            workstreamSummary: lightSummary.id,
+            transferables: true,
+          });
+
+          if (deep.name?.trim()) title = deep.name.trim();
+          timestamp = deep.updated?.readable ?? deep.created?.readable ?? timestamp;
+
+          // Extract tag text — try iterable first, then fall back to indices
+          const tags = (deep.tags?.iterable ?? [])
+            .map((tag) => (tag as any).text?.trim())
+            .filter(Boolean);
+          if (tags.length > 0) tagLine = `Tags: ${tags.join(", ")}`;
+
+          // Phase 3: Fetch annotations by UUID from the indices map
+          // The indices map has { annotationUUID: indexNumber }
+          const annotationIds = Object.keys(deep.annotations?.indices ?? {});
+
+          if (annotationIds.length > 0) {
+            console.log(`[Sentinel WPE] Fetching ${annotationIds.length} annotations for "${title}"`);
+
+            // Fetch up to 3 annotations in parallel
+            const annotationResults = await Promise.all(
+              annotationIds.slice(0, 3).map(async (annId) => {
+                try {
+                  const fullAnnotation = await annotationApi.annotationSpecificAnnotationSnapshot({
+                    annotation: annId,
+                  });
+                  return fullAnnotation.text || null;
+                } catch {
+                  console.warn(`[Sentinel WPE] Could not fetch annotation ${annId}`);
+                  return null;
+                }
+              }),
+            );
+
+            const texts = annotationResults.filter((t): t is string => Boolean(t));
+            if (texts.length > 0) {
+              detailedText = texts.join("\n\n");
+            }
+
+            console.log(`[Sentinel WPE] Deep summary "${title}":`, {
+              annotationIdsFound: annotationIds.length,
+              textsExtracted: texts.length,
+              hasText: detailedText.length > 0,
+              preview: detailedText.substring(0, 80),
+            });
+          }
+        } catch (deepErr) {
+          console.warn(`[Sentinel WPE] Could not deep-fetch summary ${lightSummary.id}:`, deepErr);
+        }
+
+        if (!detailedText) {
+          detailedText = "Continuous telemetry tracked by Pieces OS Pattern Engine.";
+        }
+
+        // ── Assemble Block ──
+        const lines = [
+          `--- LIVE WORKSTREAM CONTEXT: ${title} ---`,
+          timestamp ? `Timestamp: ${timestamp}` : "",
+          tagLine,
+          "",
+          detailedText,
+          "-----------------------------------------------",
+        ].filter((l) => l !== "");
+
+        return "\n" + lines.join("\n") + "\n";
+      }),
     );
 
-    console.log("Assets (sorted newest-first):", sorted.length);
+    console.log("[Sentinel WPE] Context blocks built:", contextBlocks.length);
+    return contextBlocks;
 
-    const snippets: string[] = [];
-    const seen = new Set<string>();
-
-    for (const asset of sorted) {
-      const snippet = extractRawTextFromAsset(asset);
-      if (!snippet || seen.has(snippet)) {
-        continue;
-      }
-
-      console.log("Extracted snippet preview:", snippet.substring(0, 30));
-
-      seen.add(snippet);
-      snippets.push(snippet);
-
-      if (snippets.length >= safeLimit) {
-        break;
-      }
-    }
-
-    return snippets;
   } catch (error) {
-    console.error("[Pieces] Failed to fetch code snippets:", error);
-    return [];
+    console.error("[Sentinel WPE Sensor] Failed to fetch live workstream:", error);
+    return ["Error retrieving live context."];
   }
 }
-
 export async function getRecentWorkflowSummary(): Promise<string | null> {
   const api = new WorkstreamSummariesApi(createPiecesConfig());
   const to = new Date();
