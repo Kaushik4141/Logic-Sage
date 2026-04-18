@@ -483,7 +483,7 @@ export class PiecesRAG {
       return { text: "RAG pipeline not ready yet. Please wait for indexing to complete.", references: [] };
     }
 
-    const chunks = await this.retrieve(searchQuery, 8);
+    const chunks = await this.retrieve(searchQuery, 4);
 
     if (chunks.length === 0) {
       return { text: "I couldn't find relevant context in your Pieces data for that question.", references: [] };
@@ -511,10 +511,20 @@ export class PiecesRAG {
 
     const context = chunks
       .map(
-        (c, i) =>
-          `[${i + 1}] From "${scrubSensitiveText(String(c.metadata["title"] ?? "Unknown"))}" (${c.metadata["timestamp"]}):\n${scrubSensitiveText(c.content)}`
+        (c, i) => {
+          // Cap each chunk to ~500 chars to stay within Cerebras 8K token limit
+          const truncatedContent = c.content.length > 500
+            ? c.content.substring(0, 500) + '...'
+            : c.content;
+          return `[${i + 1}] From "${scrubSensitiveText(String(c.metadata["title"] ?? "Unknown"))}" (${c.metadata["timestamp"]}):\n${scrubSensitiveText(truncatedContent)}`;
+        }
       )
       .join("\n\n");
+
+    // Cap the user query portion to prevent oversized prompts
+    const safeQuery = (fullQuery || searchQuery).length > 2000
+      ? (fullQuery || searchQuery).substring(0, 2000) + '... (truncated)'
+      : (fullQuery || searchQuery);
 
     const prompt = `You are Sentinel, an AI assistant with access to the developer's recent activity from Pieces OS.
 
@@ -534,7 +544,7 @@ ${context}
 --- END PIECES CONTEXT ---
 
 User query details: 
-${fullQuery || searchQuery}
+${safeQuery}
 
 Answer:`;
 

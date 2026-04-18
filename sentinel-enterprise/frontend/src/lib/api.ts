@@ -214,3 +214,46 @@ export async function getDeveloperBrief(
 
   return data.brief ?? "";
 }
+
+/**
+ * Depth Inspection API — fetches a detailed, RAG-grounded explanation for
+ * a specific phrase detected in a developer's AI brief.
+ *
+ * POST /api/developer-depth/:username
+ * Body: { phrase, local_context }
+ * Response: { status, text, references? }
+ */
+export interface DepthExplanationResponse {
+  text: string;
+  references: RagReference[];
+}
+
+export async function getDepthExplanation(
+  memberUsername: string,
+  phrase: string,
+  localContext?: MemberLocalContext,
+): Promise<DepthExplanationResponse> {
+  const response = await fetch(
+    `${SENTINEL_BACKEND_URL}/api/developer-depth/${encodeURIComponent(memberUsername)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phrase,
+        local_context: localContext ?? {},
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Backend returned ${response.status}: ${errorBody}`);
+  }
+
+  const data = (await response.json()) as SentinelAIResponse;
+  if (data.status === "error") {
+    throw new Error(data.message ?? "Unknown backend error");
+  }
+
+  return { text: data.text ?? "", references: data.references ?? [] };
+}
