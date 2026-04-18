@@ -122,7 +122,7 @@
   body {
     @apply bg-zinc-900 text-zinc-200 antialiased;
     font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-    font-size: 15px; 
+    font-size: 15px;
     line-height: 1.6;
     letter-spacing: normal;
   }
@@ -139,7 +139,15 @@
    the entire project, ignoring all inline tailwind tiny text classes
    ======================================================== */
 
-body *, p, span, div, a, li, button, td, th {
+body *,
+p,
+span,
+div,
+a,
+li,
+button,
+td,
+th {
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
   font-size: 15px !important;
   line-height: 1.6 !important;
@@ -148,11 +156,38 @@ body *, p, span, div, a, li, button, td, th {
 }
 
 /* Allow structural headings to maintain their size hierarchy while stripping tracking/casing */
-h1 { font-size: 24px !important; font-weight: 600 !important; color: #ffffff !important; letter-spacing: normal !important; text-transform: none !important; margin-bottom: 0.5rem !important; }
-h2 { font-size: 20px !important; font-weight: 600 !important; color: #ffffff !important; letter-spacing: normal !important; text-transform: none !important; margin-bottom: 0.5rem !important; }
-h3, h4, h5, h6 { font-size: 16px !important; font-weight: 600 !important; color: #ffffff !important; letter-spacing: normal !important; text-transform: none !important; margin-bottom: 0.5rem !important; }
+h1 {
+  font-size: 24px !important;
+  font-weight: 600 !important;
+  color: #ffffff !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  margin-bottom: 0.5rem !important;
+}
+
+h2 {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  color: #ffffff !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  margin-bottom: 0.5rem !important;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  color: #ffffff !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  margin-bottom: 0.5rem !important;
+}
 
 /* Keep icon sizing unaffected by the global override */
-svg, svg * {
+svg,
+svg * {
   font-size: inherit !important;
 }

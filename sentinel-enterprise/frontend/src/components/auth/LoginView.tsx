@@ -31,10 +31,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
   return (
     <div className="min-h-screen w-full bg-background flex items-center justify-center relative overflow-hidden font-sans dark text-foreground selection:bg-primary/30">
       {/* Dynamic Background Elements */}
-      <div className="absolute inset-0 z-0 flex items-center justify-center opacity-40">
-        <div className="w-[1200px] h-[500px] bg-primary/20 rounded-full blur-[150px] -rotate-45 translate-x-1/4 -translate-y-1/4 animate-pulse duration-[8000ms]" />
-        <div className="w-[800px] h-[600px] bg-blue-900/20 rounded-full blur-[120px] absolute bottom-0 left-0 -translate-x-1/3 translate-y-1/3" />
-      </div>
+     
 
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay z-0"></div>
 
@@ -49,11 +46,14 @@ export function LoginView({ onLogin }: LoginViewProps) {
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
           {/* Header */}
-          <div className="text-center mb-10 space-y-3">
-            <div className="mx-auto h-16 w-16 bg-primary/10 rounded-2xl border border-primary/20 flex items-center justify-center relative shadow-[0_0_30px_-5px_rgba(var(--primary),0.3)]">
-              <ShieldAlert className="h-8 w-8 text-primary absolute" />
+          <div className="text-center mb-10 space-y-4">
+            <div className="flex justify-center">
+              <img 
+                src="/loginlogo.png" 
+                alt="Sentinel" 
+                className="h-32 w-auto object-contain drop-shadow-[0_0_15px_rgba(var(--primary),0.3)]"
+              />
             </div>
-            <h1 className="text-3xl font-bold tracking-tighter uppercase text-foreground">Sentinel <span className="text-primary font-light">OS</span></h1>
             <p className="text-sm font-mono text-muted-foreground uppercase tracking-widest px-4">
               Authorized personnel only
             </p>

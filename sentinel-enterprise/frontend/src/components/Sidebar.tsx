@@ -48,7 +48,7 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange, teamMem
                   className="w-full px-1.5 shrink-0 cursor-pointer hover:scale-105 transition-transform flex items-center justify-center"
                   onClick={onToggle}
                 >
-                  <img src="/logo 1.png" alt="Sentinel Logo" className="w-full h-10 object-contain" />
+                  <img src="/logo.png" alt="Sentinel Logo" className="w-full h-10 object-contain" />
                 </div>
               </TooltipTrigger>
               <TooltipContent side="right">Expand Sidebar</TooltipContent>
