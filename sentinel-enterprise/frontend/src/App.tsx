@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
-
-import { askSentinelAI } from "./lib/api";
+import { getLatestTelemetry, getTauriDb } from "./lib/localDb";
+import { askSentinelAI, type RagReference } from "./lib/api";
 import { syncTelemetryToCloud } from "./lib/cloudSync";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -27,7 +27,8 @@ import {
   Paperclip,
   Smile,
   Command,
-  CloudUpload
+  CloudUpload,
+  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ interface ChatMessage {
   id: number;
   role: "user" | "ai";
   content: string;
+  references?: RagReference[];
 }
 
 export default function App() {
@@ -53,12 +55,43 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isChatAtBottom, setIsChatAtBottom] = useState(true);
+
+  function scrollChatToBottom() {
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: "smooth",
+    });
+  }
 
   // Auto-scroll to bottom when new messages appear
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isLoading]);
+    if (activeTab !== "chat") return;
+    scrollChatToBottom();
+  }, [activeTab, chatHistory, isLoading]);
+
+  useEffect(() => {
+    if (activeTab !== "chat") return;
+
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    const updateScrollState = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setIsChatAtBottom(distanceFromBottom < 64);
+    };
+
+    updateScrollState();
+    viewport.addEventListener("scroll", updateScrollState);
+
+    return () => viewport.removeEventListener("scroll", updateScrollState);
+  }, [activeTab, chatHistory.length, isLoading]);
 
   useEffect(() => {
     const runPiecesHealthCheck = async () => {
@@ -118,7 +151,8 @@ export default function App() {
       const aiMessage: ChatMessage = {
         id: Date.now() + 1,
         role: "ai",
-        content: aiResponse,
+        content: aiResponse.text,
+        references: aiResponse.references,
       };
       setChatHistory((prev) => [...prev, aiMessage]);
     } catch (error) {
@@ -146,6 +180,61 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
+  }
+
+function renderMessageContent(content: string, references: RagReference[] = []) {
+    const referencesById = new Map(references.map((reference) => [reference.id, reference]));
+    const parts = content.split(/(\[\d+\](?:\[\d+\])*)/g).filter(Boolean);
+
+    return parts.map((part, index) => {
+      const matchesCitation = /^(\[\d+\])+$/g.test(part);
+
+      if (!matchesCitation) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      const ids = [...part.matchAll(/\[(\d+)\]/g)]
+        .map((match) => Number(match[1]))
+        .filter((id, citationIndex, allIds) => allIds.indexOf(id) === citationIndex)
+        .filter((id) => referencesById.has(id));
+
+      if (ids.length === 0) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      return (
+        <span key={`${part}-${index}`} className="mx-1 inline-flex flex-wrap items-center gap-1 align-middle">
+          {(() => {
+            const primaryReference = referencesById.get(ids[0])!;
+            const extraCount = ids.length - 1;
+            const compactLabel = primaryReference.title.length > 16
+              ? `${primaryReference.title.slice(0, 16)}...`
+              : primaryReference.title;
+            const titleText = ids
+              .map((id) => {
+                const reference = referencesById.get(id)!;
+                return `[${reference.id}] ${reference.title} • ${reference.timestamp}\n${reference.snippet}`;
+              })
+              .join("\n\n");
+
+            return (
+              <span
+                title={titleText}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/90 px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+              >
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
+                  {primaryReference.id}
+                </span>
+                <span>{primaryReference.technology ?? compactLabel}</span>
+                {extraCount > 0 && (
+                  <span className="text-[9px] text-muted-foreground/80">+{extraCount}</span>
+                )}
+              </span>
+            );
+          })()}
+        </span>
+      );
+    });
   }
 
   return (
@@ -484,6 +573,204 @@ export default function App() {
                           </motion.div>
                         ))}
                       </div>
+                    </ScrollArea>
+                  </div>
+                )}
+                
+                {activeTab === "chat" && (
+                  /* Chat View */
+                  <div className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden relative">
+                     <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-6 z-10">
+                       <div className="max-w-3xl mx-auto space-y-6">
+                         {chatHistory.length === 0 && !isLoading && (
+                           <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
+                             <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20">
+                               <Terminal className="h-8 w-8 text-primary/60" />
+                             </div>
+                             <div className="space-y-2">
+                               <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-foreground">Sentinel_CLI :: Ready</h3>
+                               <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">
+                                 Ask Sentinel a question about your codebase. It will use your local Pieces context to provide deterministic answers.
+                               </p>
+                             </div>
+                           </div>
+                         )}
+                         <AnimatePresence>
+                           {chatHistory.map((msg) => (
+                             <motion.div
+                               key={msg.id}
+                               initial={{ opacity: 0, y: 10 }}
+                               animate={{ opacity: 1, y: 0 }}
+                               className={cn(
+                                 "flex flex-col gap-2",
+                                 msg.role === "ai" ? "items-center" : "items-start"
+                               )}
+                             >
+                               {msg.role === "ai" ? (
+                                 <div className="w-full relative py-6 px-6 rounded-2xl border border-primary/20 bg-primary/5 shadow-xl shadow-primary/5 group overflow-hidden">
+                                   <div className="absolute top-0 right-0 p-4 opacity-10">
+                                     <Code2 className="h-16 w-16" />
+                                   </div>
+                                   <div className="flex items-center gap-2 mb-3">
+                                     <div className="p-1.5 rounded-lg bg-primary/20 border border-primary/30">
+                                       <Terminal className="h-4 w-4 text-primary" />
+                                     </div>
+                                     <span className="text-xs font-bold tracking-widest uppercase text-primary">Sentinel AI</span>
+                                    </div>
+                                   <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                     {renderMessageContent(msg.content, msg.references)}
+                                   </div>
+                                    {msg.references && msg.references.length > 0 && (
+                                      <div className="mt-4 border-t border-primary/10 pt-4">
+                                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                          Sources
+                                        </div>
+                                        <div className="space-y-2">
+                                        {msg.references.map((reference) => (
+                                          <div
+                                            key={`${msg.id}-${reference.id}`}
+                                            className="rounded-xl border border-border/60 bg-background/70 p-3 text-left shadow-sm"
+                                          >
+                                            <div className="flex items-start gap-3">
+                                              {reference.imageUrl ? (
+                                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-background/80 p-2">
+                                                  <img
+                                                    src={reference.imageUrl}
+                                                    alt={reference.imageAlt ?? reference.technology ?? "Technology"}
+                                                    className="h-8 w-8 object-contain"
+                                                  />
+                                                </div>
+                                              ) : (
+                                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-gradient-to-br from-primary/15 to-transparent text-sm font-bold text-primary">
+                                                  {(reference.technology ?? reference.title ?? "T").slice(0, 2).toUpperCase()}
+                                                </div>
+                                              )}
+                                              <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
+                                                    [{reference.id}]
+                                                  </span>
+                                                  <span className="truncate">
+                                                    {reference.technology ?? (reference.title || "Technology")}
+                                                  </span>
+                                                </div>
+                                                <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                                                  Technology Reference
+                                                </p>
+                                                <p className="mt-2 text-xs leading-relaxed text-foreground/80">
+                                                  {reference.details ?? reference.snippet}
+                                                </p>
+                                                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                                                  {reference.snippet}
+                                                </p>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                 </div>
+                               ) : (
+                                 <>
+                                   <div className="flex items-center gap-2 px-1">
+                                     <span className="text-xs font-bold text-foreground">You</span>
+                                   </div>
+                                   <div className="relative px-4 py-3 rounded-xl bg-muted/30 border border-border/50 max-w-[85%] group hover:border-border/80 transition-colors">
+                                     <p className="text-sm text-foreground/80 leading-relaxed font-sans">
+                                       {msg.content}
+                                     </p>
+                                   </div>
+                                 </>
+                               )}
+                             </motion.div>
+                           ))}
+
+                           {/* Loading indicator */}
+                           {isLoading && (
+                             <motion.div
+                               key="loading"
+                               initial={{ opacity: 0, y: 10 }}
+                               animate={{ opacity: 1, y: 0 }}
+                               className="flex flex-col gap-2 items-center"
+                             >
+                               <div className="w-full relative py-6 px-6 rounded-2xl border border-primary/20 bg-primary/5 shadow-xl shadow-primary/5 overflow-hidden">
+                                 <div className="flex items-center gap-3">
+                                   <div className="p-1.5 rounded-lg bg-primary/20 border border-primary/30">
+                                     <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                                   </div>
+                                   <span className="text-xs font-bold tracking-widest uppercase text-primary animate-pulse">Sentinel is thinking...</span>
+                                 </div>
+                               </div>
+                             </motion.div>
+                           )}
+                         </AnimatePresence>
+                         <div ref={chatEndRef} />
+                       </div>
+                     </div>
+
+                     {!isChatAtBottom && (
+                       <div className="pointer-events-none absolute bottom-28 right-8 z-20">
+                         <button
+                           type="button"
+                           onClick={scrollChatToBottom}
+                           className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-3 py-2 text-xs font-medium text-primary shadow-lg backdrop-blur transition hover:border-primary/40 hover:bg-primary/5"
+                         >
+                           <ChevronDown className="h-4 w-4" />
+                           Latest
+                         </button>
+                       </div>
+                     )}
+
+                     {/* Chat Input Area */}
+                     <div className="p-4 border-t border-border/50 bg-background/50 backdrop-blur-md z-10">
+                       <div className="max-w-3xl mx-auto relative group">
+                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/5 to-primary/0 rounded-xl blur opacity-0 group-focus-within:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+                         <form
+                           onSubmit={(e) => {
+                             e.preventDefault();
+                             void handleSendMessage(message);
+                           }}
+                           className="relative flex flex-col p-2 rounded-xl border border-border bg-background focus-within:border-primary/50 transition-all shadow-sm"
+                         >
+                           <div className="flex items-center gap-2 mb-2 px-2">
+                             <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                               <Paperclip className="h-4 w-4" />
+                             </button>
+                             <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                               <Smile className="h-4 w-4" />
+                             </button>
+                             <Separator orientation="vertical" className="h-4" />
+                             <Badge variant="outline" className="text-[9px] h-4 font-mono text-muted-foreground border-border/50">Markdown Supported</Badge>
+                           </div>
+                           <div className="flex gap-2">
+                             <Input
+                               value={message}
+                               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessage(e.target.value)}
+                               placeholder="Ask Sentinel about your codebase..."
+                               disabled={isLoading}
+                               className="border-none bg-transparent focus-visible:ring-0 text-sm h-10 py-0 shadow-none placeholder:text-muted-foreground/50"
+                             />
+                             <button
+                               type="submit"
+                               disabled={isLoading || message.trim().length === 0}
+                               className={cn(
+                                 "p-2 rounded-lg bg-muted text-muted-foreground transition-all flex items-center gap-2 disabled:opacity-50",
+                                 message.length > 0 && !isLoading && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+                               )}
+                             >
+                               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                             </button>
+                           </div>
+                         </form>
+                       </div>
+                       <div className="flex justify-center mt-3">
+                         <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-mono">
+                           <span className="flex items-center gap-1.5"><Command className="h-3 w-3" /> + Enter to send</span>
+                           <span className="flex items-center gap-1.5"><span className="text-xs">/</span> for tools</span>
+                         </div>
+                       </div>
+                     </div>
                     </section>
                   </div>
                 </ScrollArea>
