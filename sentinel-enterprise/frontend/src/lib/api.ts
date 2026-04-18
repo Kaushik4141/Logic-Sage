@@ -2,16 +2,33 @@ import { getLatestTelemetry } from "./localDb";
 
 const SENTINEL_BACKEND_URL = "http://localhost:3000";
 
+export interface RagReference {
+  id: number;
+  title: string;
+  timestamp?: string;
+  snippet: string;
+  score?: string;
+  url?: string;
+  source?: string;
+  technology?: string;
+  details?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+}
+
 export interface SentinelAIResponse {
   status: "success" | "error";
-  text: string;
+  text?: string;
+  message?: string;
+  references?: RagReference[];
 }
 
 /**
  * Queries the local SQLite telemetry table for recent Pieces code snippets,
  * then sends them alongside the user's question to the Sentinel AI backend.
+ * Returns { text, references } so the UI can render citation chips.
  */
-export async function askSentinelAI(userQuery: string): Promise<string> {
+export async function askSentinelAI(userQuery: string): Promise<{ text: string; references: RagReference[] }> {
   try {
     // 1. Fetch the most recent telemetry row from local SQLite via Drizzle
     const latestTelemetry = await getLatestTelemetry();
@@ -66,10 +83,10 @@ export async function askSentinelAI(userQuery: string): Promise<string> {
     const data = (await response.json()) as SentinelAIResponse;
 
     if (data.status === "error") {
-      throw new Error(`Sentinel AI error: ${data.text}`);
+      throw new Error(`Sentinel AI error: ${data.message ?? data.text ?? "Unknown backend error"}`);
     }
 
-    return data.text;
+    return { text: data.text ?? "", references: data.references ?? [] };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown error contacting Sentinel AI";

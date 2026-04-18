@@ -1,15 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { checkPiecesConnection } from "./lib/pieces";
 import { runLocalCapture } from "./lib/captureLoop";
-
-import { askSentinelAI } from "./lib/api";
+import { askSentinelAI, type RagReference } from "./lib/api";
 import { syncTelemetryToCloud } from "./lib/cloudSync";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
 import {
   Users,
   Search,
@@ -28,7 +26,8 @@ import {
   Smile,
   Command,
   CloudUpload,
-  LogOut
+  LogOut,
+  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -43,7 +42,14 @@ interface ChatMessage {
   id: number;
   role: "user" | "ai";
   content: string;
+  references?: RagReference[];
 }
+
+const CHAT_STARTERS = [
+  "Why is the authentication flow failing right now?",
+  "What technology is this answer referring to?",
+  "Summarize the latest teammate code changes.",
+];
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<{id: string; email: string; role: string; teamId: string | null} | null>(() => {
@@ -99,12 +105,43 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isChatAtBottom, setIsChatAtBottom] = useState(true);
+
+  function scrollChatToBottom() {
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: "smooth",
+    });
+  }
 
   // Auto-scroll to bottom when new messages appear
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isLoading]);
+    if (activeTab !== "chat") return;
+    scrollChatToBottom();
+  }, [activeTab, chatHistory, isLoading]);
+
+  useEffect(() => {
+    if (activeTab !== "chat") return;
+
+    const viewport = chatScrollRef.current;
+    if (!viewport) return;
+
+    const updateScrollState = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setIsChatAtBottom(distanceFromBottom < 64);
+    };
+
+    updateScrollState();
+    viewport.addEventListener("scroll", updateScrollState);
+
+    return () => viewport.removeEventListener("scroll", updateScrollState);
+  }, [activeTab, chatHistory.length, isLoading]);
 
   useEffect(() => {
     const runPiecesHealthCheck = async () => {
@@ -164,7 +201,8 @@ export default function App() {
       const aiMessage: ChatMessage = {
         id: Date.now() + 1,
         role: "ai",
-        content: aiResponse,
+        content: aiResponse.text,
+        references: aiResponse.references,
       };
       setChatHistory((prev) => [...prev, aiMessage]);
     } catch (error) {
@@ -192,6 +230,70 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
+  }
+
+  function handleComposerKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+
+    event.preventDefault();
+    void handleSendMessage(message);
+  }
+
+  function renderMessageContent(content: string, references: RagReference[] = []) {
+    const referencesById = new Map(references.map((reference) => [reference.id, reference]));
+    const parts = content.split(/(\[\d+\](?:\[\d+\])*)/g).filter(Boolean);
+
+    return parts.map((part, index) => {
+      const matchesCitation = /^(\[\d+\])+$/g.test(part);
+
+      if (!matchesCitation) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      const ids = [...part.matchAll(/\[(\d+)\]/g)]
+        .map((match) => Number(match[1]))
+        .filter((id, citationIndex, allIds) => allIds.indexOf(id) === citationIndex)
+        .filter((id) => referencesById.has(id));
+
+      if (ids.length === 0) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      return (
+        <span key={`${part}-${index}`} className="mx-1 inline-flex flex-wrap items-center gap-1 align-middle">
+          {(() => {
+            const primaryReference = referencesById.get(ids[0])!;
+            const extraCount = ids.length - 1;
+            const compactLabel = primaryReference.title.length > 16
+              ? `${primaryReference.title.slice(0, 16)}...`
+              : primaryReference.title;
+            const titleText = ids
+              .map((id) => {
+                const reference = referencesById.get(id)!;
+                return `[${reference.id}] ${reference.title} • ${reference.timestamp}\n${reference.snippet}`;
+              })
+              .join("\n\n");
+
+            return (
+              <span
+                title={titleText}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/90 px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+              >
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
+                  {primaryReference.id}
+                </span>
+                <span>{primaryReference.technology ?? compactLabel}</span>
+                {extraCount > 0 && (
+                  <span className="text-[9px] text-muted-foreground/80">+{extraCount}</span>
+                )}
+              </span>
+            );
+          })()}
+        </span>
+      );
+    });
   }
 
   // --- Auth & Identity Routing ---
@@ -579,22 +681,43 @@ export default function App() {
                 </ScrollArea>
               </div>
             )}
-
-            {activeTab === "chat" && (
+                
+             {activeTab === "chat" && (
               /* Chat View */
               <div className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden relative">
-                <ScrollArea className="flex-1 p-6 z-10">
+                <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-6 z-10">
                   <div className="max-w-3xl mx-auto space-y-6">
                     {chatHistory.length === 0 && !isLoading && (
-                      <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
-                        <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20">
-                          <Terminal className="h-8 w-8 text-primary/60" />
-                        </div>
-                        <div className="space-y-2">
-                          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-foreground">Sentinel_CLI :: Ready</h3>
-                          <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">
-                            Ask Sentinel a question about your codebase. It will use your local Pieces context to provide deterministic answers.
-                          </p>
+                      <div className="py-12">
+                        <div className="rounded-3xl border border-border/60 bg-gradient-to-b from-primary/[0.07] via-background to-background p-8 shadow-xl shadow-primary/5">
+                          <div className="flex flex-col items-center justify-center space-y-4 text-center">
+                            <div className="p-4 rounded-2xl bg-primary/10 border border-primary/20">
+                              <Terminal className="h-8 w-8 text-primary/70" />
+                            </div>
+                            <div className="space-y-2">
+                              <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-foreground">Sentinel_CLI :: Ready</h3>
+                              <p className="text-sm text-muted-foreground max-w-xl leading-relaxed">
+                                Ask Sentinel about the current codebase, recent teammate work, or a technology mentioned in the answer. Chat responses use your local Pieces context and show technology cards when a citation is needed.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-8 grid gap-3 md:grid-cols-3">
+                            {CHAT_STARTERS.map((starter) => (
+                              <button
+                                key={starter}
+                                type="button"
+                                onClick={() => void handleSendMessage(starter)}
+                                className="rounded-2xl border border-border/60 bg-background/80 px-4 py-4 text-left transition hover:border-primary/30 hover:bg-primary/[0.04]"
+                              >
+                                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                                  Quick Ask
+                                </div>
+                                <div className="mt-2 text-sm leading-relaxed text-foreground/85">
+                                  {starter}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -620,9 +743,59 @@ export default function App() {
                                 </div>
                                 <span className="text-xs font-bold tracking-widest uppercase text-primary">Sentinel AI</span>
                               </div>
-                              <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
-                                {msg.content}
-                              </p>
+                              <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                {renderMessageContent(msg.content, msg.references)}
+                              </div>
+                              {msg.references && msg.references.length > 0 && (
+                                <div className="mt-4 border-t border-primary/10 pt-4">
+                                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                    Technology Cards
+                                  </div>
+                                  <div className="space-y-2">
+                                    {msg.references.map((reference) => (
+                                      <div
+                                        key={`${msg.id}-${reference.id}`}
+                                        className="rounded-xl border border-border/60 bg-background/70 p-3 text-left shadow-sm"
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          {reference.imageUrl ? (
+                                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-background/80 p-2">
+                                              <img
+                                                src={reference.imageUrl}
+                                                alt={reference.imageAlt ?? reference.technology ?? "Technology"}
+                                                className="h-8 w-8 object-contain"
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-gradient-to-br from-primary/15 to-transparent text-sm font-bold text-primary">
+                                              {(reference.technology ?? reference.title ?? "T").slice(0, 2).toUpperCase()}
+                                            </div>
+                                          )}
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
+                                                [{reference.id}]
+                                              </span>
+                                              <span className="truncate">
+                                                {reference.technology ?? (reference.title || "Technology")}
+                                              </span>
+                                            </div>
+                                            <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                                              Technology Reference
+                                            </p>
+                                            <p className="mt-2 text-xs leading-relaxed text-foreground/80">
+                                              {reference.details ?? reference.snippet}
+                                            </p>
+                                            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                                              {reference.snippet}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <>
@@ -660,7 +833,20 @@ export default function App() {
                     </AnimatePresence>
                     <div ref={chatEndRef} />
                   </div>
-                </ScrollArea>
+                </div>
+
+                {!isChatAtBottom && (
+                  <div className="pointer-events-none absolute bottom-32 right-8 z-20">
+                    <button
+                      type="button"
+                      onClick={scrollChatToBottom}
+                      className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-3 py-2 text-xs font-medium text-primary shadow-lg backdrop-blur transition hover:border-primary/40 hover:bg-primary/5"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                      Latest
+                    </button>
+                  </div>
+                )}
 
                 {/* Chat Input Area */}
                 <div className="p-4 border-t border-border/50 bg-background/50 backdrop-blur-md z-10">
@@ -672,42 +858,45 @@ export default function App() {
                         void handleSendMessage(message);
                       }}
                       className="relative flex flex-col p-2 rounded-xl border border-border bg-background focus-within:border-primary/50 transition-all shadow-sm"
-                    >
-                      <div className="flex items-center gap-2 mb-2 px-2">
-                        <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
-                          <Paperclip className="h-4 w-4" />
-                        </button>
-                        <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
-                          <Smile className="h-4 w-4" />
-                        </button>
-                        <Separator orientation="vertical" className="h-4" />
-                        <Badge variant="outline" className="text-[9px] h-4 font-mono text-muted-foreground border-border/50">Markdown Supported</Badge>
-                      </div>
-                      <div className="flex gap-2">
-                        <Input
-                          value={message}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessage(e.target.value)}
-                          placeholder="Ask Sentinel about your codebase..."
-                          disabled={isLoading}
-                          className="border-none bg-transparent focus-visible:ring-0 text-sm h-10 py-0 shadow-none placeholder:text-muted-foreground/50"
-                        />
-                        <button
-                          type="submit"
-                          disabled={isLoading || message.trim().length === 0}
-                          className={cn(
-                            "p-2 rounded-lg bg-muted text-muted-foreground transition-all flex items-center gap-2 disabled:opacity-50",
-                            message.length > 0 && !isLoading && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-                          )}
-                        >
-                          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        </button>
-                      </div>
+                      >
+                        <div className="flex items-center gap-2 mb-2 px-2">
+                          <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                            <Paperclip className="h-4 w-4" />
+                          </button>
+                          <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                            <Smile className="h-4 w-4" />
+                          </button>
+                          <Separator orientation="vertical" className="h-4" />
+                          <Badge variant="outline" className="text-[9px] h-4 font-mono text-muted-foreground border-border/50">Pieces Context</Badge>
+                        </div>
+                        <div className="flex gap-3 items-end">
+                          <textarea
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
+                            onKeyDown={handleComposerKeyDown}
+                            placeholder="Ask Sentinel about your codebase, a teammate change, or a technology in the answer..."
+                            disabled={isLoading}
+                            rows={3}
+                            className="min-h-[88px] flex-1 resize-none rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isLoading || message.trim().length === 0}
+                            className={cn(
+                              "mb-1 inline-flex h-11 items-center gap-2 rounded-xl bg-muted px-4 text-sm font-medium text-muted-foreground transition-all disabled:opacity-50",
+                              message.trim().length > 0 && !isLoading && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+                            )}
+                          >
+                            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            <span>Send</span>
+                          </button>
+                        </div>
                     </form>
                   </div>
                   <div className="flex justify-center mt-3">
                     <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-mono">
-                      <span className="flex items-center gap-1.5"><Command className="h-3 w-3" /> + Enter to send</span>
-                      <span className="flex items-center gap-1.5"><span className="text-xs">/</span> for tools</span>
+                      <span className="flex items-center gap-1.5"><Command className="h-3 w-3" /> Enter to send</span>
+                      <span className="flex items-center gap-1.5">Shift + Enter for newline</span>
                     </div>
                   </div>
                 </div>
