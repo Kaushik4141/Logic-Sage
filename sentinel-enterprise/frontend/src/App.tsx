@@ -38,6 +38,7 @@ import { Sidebar, TeamMember } from "@/components/Sidebar";
 import { LoginView } from "@/components/auth/LoginView";
 import { PendingAssignmentView } from "@/components/auth/PendingAssignmentView";
 import { InviteMemberDialog } from "@/components/ui/InviteMemberDialog";
+import { DocumentationTab } from "@/components/DocumentationTab";
 
 interface ChatMessage {
   id: number;
@@ -411,7 +412,7 @@ export default function App() {
                           "transition-colors",
                           activeTab === "summary" ? "text-foreground" : "text-muted-foreground"
                        )}>
-                          {activeTab === "summary" ? "Project_Manifest" : activeTab.toUpperCase()}
+                          {activeTab === "summary" ? "Project_Manifest" : activeTab === "documentation" ? "Knowledge_Base" : activeTab.toUpperCase()}
                        </span>
                     </div>
                     <Separator orientation="vertical" className="h-3 mx-1" />
@@ -1017,7 +1018,9 @@ export default function App() {
               />
             )}
 
-            {activeTab !== "summary" && activeTab !== "chat" && !activeTab.startsWith("member-") && (
+            {activeTab === "documentation" && <DocumentationTab />}
+
+            {activeTab !== "summary" && activeTab !== "chat" && activeTab !== "documentation" && !activeTab.startsWith("member-") && (
               /* Fallback View for other modules */
               <div className="flex-1 flex flex-col items-center justify-center p-12 bg-background min-h-0 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />

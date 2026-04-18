@@ -3,7 +3,8 @@ import {
   LayoutGrid,
   PanelLeft,
   ChevronLeft,
-  Terminal
+  Terminal,
+  Library
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../lib/utils";
@@ -99,6 +100,23 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange, teamMem
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">Team CLI</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => onTabChange("documentation")}
+                    className={cn(
+                      "h-10 w-10 rounded-xl flex items-center justify-center transition-all shadow-sm",
+                      activeTab === "documentation"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-[#1e1e1e] text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                    )}
+                  >
+                    <Library className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Documentation</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -201,6 +219,16 @@ export const Sidebar = ({ isCollapsed, onToggle, activeTab, onTabChange, teamMem
                   >
                     <Terminal className="h-4 w-4 shrink-0" />
                     <span className="font-semibold">Team CLI</span>
+                  </button>
+                  <button
+                    onClick={() => onTabChange("documentation")}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2 text-xs rounded-lg transition-all group",
+                      activeTab === "documentation" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Library className="h-4 w-4 shrink-0" />
+                    <span className="font-semibold">Documentation</span>
                   </button>
 
                 </nav>
