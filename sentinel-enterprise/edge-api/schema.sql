@@ -21,3 +21,13 @@ CREATE TABLE IF NOT EXISTS analytics (
 
 CREATE INDEX IF NOT EXISTS idx_analytics_created_at ON analytics(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_analytics_event_type ON analytics(event_type);
+
+CREATE TABLE IF NOT EXISTS telemetry (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  branch TEXT NOT NULL,
+  code_snippets TEXT,
+  timestamp TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_created_at ON telemetry(created_at DESC);
