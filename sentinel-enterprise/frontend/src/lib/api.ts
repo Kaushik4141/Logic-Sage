@@ -23,6 +23,11 @@ export interface SentinelAIResponse {
   references?: RagReference[];
 }
 
+export interface MemberLocalContext {
+  error_log?: string;
+  teammate_recent_code?: string;
+}
+
 /**
  * Queries the local SQLite telemetry table for recent Pieces code snippets,
  * then sends them alongside the user's question to the Sentinel AI backend.
@@ -93,4 +98,64 @@ export async function askSentinelAI(userQuery: string): Promise<{ text: string; 
     console.error("[askSentinelAI] Failed:", message);
     throw new Error(message);
   }
+}
+
+export async function askSentinelWithContext(
+  userQuery: string,
+  localContext: MemberLocalContext,
+  branch = "unknown",
+): Promise<{ text: string; references: RagReference[] }> {
+  const payload = {
+    user_query: userQuery,
+    local_context: {
+      error_log: localContext.error_log ?? "No error log available.",
+      teammate_recent_code:
+        localContext.teammate_recent_code ?? "No recent code snippet available from Pieces OS.",
+    },
+    branch,
+  };
+
+  const response = await fetch(`${SENTINEL_BACKEND_URL}/api/collaborate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Backend returned ${response.status}: ${errorBody}`);
+  }
+
+  const data = (await response.json()) as SentinelAIResponse;
+  if (data.status === "error") {
+    throw new Error(`Sentinel AI error: ${data.message ?? data.text ?? "Unknown backend error"}`);
+  }
+
+  return { text: data.text ?? "", references: data.references ?? [] };
+}
+
+export async function getDeveloperBrief(
+  username: string,
+  localContext: MemberLocalContext,
+): Promise<string> {
+  const response = await fetch(
+    `${SENTINEL_BACKEND_URL}/api/developer-brief/${encodeURIComponent(username)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ local_context: localContext }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Backend returned ${response.status}: ${errorBody}`);
+  }
+
+  const data = (await response.json()) as { status: "success" | "error"; brief?: string; message?: string };
+  if (data.status === "error") {
+    throw new Error(data.message ?? "Unknown backend error");
+  }
+
+  return data.brief ?? "";
 }

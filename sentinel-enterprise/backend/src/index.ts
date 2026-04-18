@@ -101,6 +101,82 @@ interface CollaborateErrorResponse {
 
 type CollaborateResponse = CollaborateSuccessResponse | CollaborateErrorResponse;
 
+function sanitizeBriefText(raw: string | null | undefined): string {
+  if (!raw) return '';
+
+  return raw
+    .replace(/[*_#>`]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function collectSnippetLines(rawValue: unknown): string[] {
+  const text = typeof rawValue === 'string' ? rawValue : '';
+  if (!text) return [];
+
+  return text
+    .split('\n')
+    .map(line => sanitizeBriefText(line))
+    .filter(Boolean)
+    .filter(line => !/^summary id:/i.test(line))
+    .filter(line => !/^timestamp:/i.test(line))
+    .filter(line => !/^live workstream context:/i.test(line))
+    .filter(line => !/^tldr$/i.test(line))
+    .filter(line => !/^core tasks/i.test(line))
+    .filter(line => !/^key discussions/i.test(line))
+    .filter(line => !/^resources reviewed/i.test(line))
+    .filter(line => !/^next steps/i.test(line))
+    .filter(line => !/^persona report/i.test(line))
+    .filter(line => !/^-{3,}$/.test(line));
+}
+
+function buildDeveloperBriefFallback(
+  username: string,
+  localContext: Record<string, unknown>,
+  historyData: unknown,
+): string {
+  const teammateRecentCode = typeof localContext.teammate_recent_code === 'string'
+    ? localContext.teammate_recent_code
+    : '';
+  const errorLog = typeof localContext.error_log === 'string'
+    ? localContext.error_log
+    : '';
+
+  const branchMatch = errorLog.match(/branch\s+([^\s.]+)/i);
+  const branch = branchMatch?.[1] ?? 'an active branch';
+
+  const titleMatches = [...teammateRecentCode.matchAll(/LIVE WORKSTREAM CONTEXT:\s*(.+?)(?:\s*---|\n|$)/gi)]
+    .map(match => sanitizeBriefText(match[1]))
+    .filter(Boolean)
+    .filter(title => title.toLowerCase() !== 'uncategorized activity');
+
+  const snippetLines = collectSnippetLines(teammateRecentCode);
+  const historySummary = sanitizeBriefText(JSON.stringify(historyData));
+
+  const focus =
+    snippetLines.find(line => line.length > 40) ??
+    snippetLines[0] ??
+    'recent telemetry and local Pieces context';
+
+  const workstream = titleMatches[0];
+  const activityLead = workstream
+    ? `${username} is currently focused on ${workstream.toLowerCase()} on ${branch}.`
+    : `${username} is currently working on ${branch}.`;
+
+  const detail = focus.endsWith('.') ? focus : `${focus}.`;
+  const historyNote = historySummary
+    ? ' This summary was generated from synced telemetry because the AI brief service was unavailable.'
+    : '';
+
+  return `${activityLead} Latest context indicates ${detail}${historyNote}`;
+}
+
+function normalizeRouteParam(value: string | string[] | undefined, fallback: string): string {
+  if (Array.isArray(value)) return value[0] ?? fallback;
+  return value ?? fallback;
+}
+
 // --- Sentinel System Prompt ---
 const SENTINEL_SYSTEM_PROMPT = `You are Sentinel, an enterprise context router. Use the uncommitted teammate code provided in the context to explain why the user's app is breaking.
 
@@ -162,7 +238,7 @@ app.get('/api/rag/status', (_req: Request, res: Response): void => {
 
 app.post('/api/developer-brief/:username', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username } = req.params;
+    const username = normalizeRouteParam(req.params.username, 'This developer');
     const { local_context } = req.body;
 
     if (!local_context) {
@@ -184,7 +260,8 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
     }
 
     const prompt = `History:\n${JSON.stringify(historyData, null, 2)}\n\nLocal Context:\n${JSON.stringify(local_context, null, 2)}`;
-    const systemPrompt = 'Given this history and this local desktop context, write a 1-sentence brief of what this dev is doing.';
+    const systemPrompt =
+      'Given this history and local desktop context, write a concise 2-sentence developer brief. Plain text only. No markdown, headings, labels, or bullet points. Focus on current work, technical direction, and any blocking issue if clearly present.';
 
     let result;
     try {
@@ -203,14 +280,22 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
         });
       } catch (fallbackError) {
         console.error(`[Sentinel] Fallback model (${FALLBACK_MODEL}) also failed.`, { primaryError, fallbackError });
-        throw fallbackError;
+        result = {
+          text: buildDeveloperBriefFallback(username, local_context as Record<string, unknown>, historyData),
+        };
       }
     }
 
-    res.json({ status: 'success', brief: result.text });
+    res.json({ status: 'success', brief: sanitizeBriefText(result.text) });
   } catch (error) {
     console.error('Error in /api/developer-brief:', error);
-    res.status(500).json({ status: 'error', message: 'Internal server error' });
+    const username = normalizeRouteParam(req.params.username, 'This developer');
+    const fallbackBrief = buildDeveloperBriefFallback(
+      username,
+      (req.body?.local_context ?? {}) as Record<string, unknown>,
+      null,
+    );
+    res.json({ status: 'success', brief: fallbackBrief });
   }
 });
 
