@@ -32,6 +32,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { MemberProfile } from "@/components/MemberProfile";
+import { TeamMapViewer } from "@/components/TeamMapViewer";
 import { Sidebar, TeamMember } from "@/components/Sidebar";
 
 import { LoginView } from "@/components/auth/LoginView";
@@ -498,6 +499,8 @@ export default function App() {
                       <p className="text-[13px] text-muted-foreground leading-relaxed font-sans max-w-3xl">
                         System architecture is the high-level conceptual model that defines the structure, behaviour, and views of a system. It serves as a master blueprint, outlining how hardware and software components, interfaces, and security layers work together to meet specific business and technical goals.
                       </p>
+
+                      <TeamMapViewer />
 
                       <div className="pt-8 relative">
                         {/* Professional Technical Schematic */}

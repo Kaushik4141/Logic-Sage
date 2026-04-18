@@ -29,8 +29,10 @@ const cerebras = createOpenAI({
 
 const app = express();
 const port = 3000;
-const PRIMARY_MODEL   = process.env.CEREBRAS_PRIMARY_MODEL   || 'llama3.1-8b';
-const FALLBACK_MODEL  = process.env.CEREBRAS_FALLBACK_MODEL  || 'llama3.1-8b';
+
+// FIXED: Added hyphens to model names to match Cerebras API spec
+const PRIMARY_MODEL = process.env.CEREBRAS_PRIMARY_MODEL || 'llama3.1-8b';
+const FALLBACK_MODEL = process.env.CEREBRAS_FALLBACK_MODEL || 'llama3.1-8b';
 
 // --- RAG Initialization ---
 async function initRAG() {
@@ -296,6 +298,66 @@ app.post('/api/developer-brief/:username', async (req: Request, res: Response): 
       null,
     );
     res.json({ status: 'success', brief: fallbackBrief });
+  }
+});
+
+app.get('/api/team-map', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const edgeApiUrl = process.env.EDGE_API_URL || 'http://127.0.0.1:8787';
+    let eventsData = null;
+    try {
+      // FIXED: Changed fetch URL from /api/events to /api/team-history
+      const eventsRes = await fetch(`${edgeApiUrl}/api/team-history`);
+      if (eventsRes.ok) {
+        const jsonResponse = (await eventsRes.json()) as any;
+        eventsData = jsonResponse.data;
+      } else {
+        console.warn(`[Sentinel] Events API returned status ${eventsRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[Sentinel] Failed to fetch events from ${edgeApiUrl}:`, err);
+    }
+
+    if (!eventsData) {
+      res.status(502).json({ error: 'Failed to fetch events' });
+      return;
+    }
+
+    const prompt = `Recent Events:\n${JSON.stringify(eventsData, null, 2)}`;
+    const systemPrompt = `You are a Senior Architect. Based on these recent GitHub merges and Jira tickets, identify which system services (e.g., Auth, Database, API, UI) are being modified. 
+Generate a Mermaid.js graph TD diagram showing the flow of work. 
+
+CRITICAL MERMAID SYNTAX RULES:
+1. Connect nodes simply: A --> B
+2. If you want to add descriptive text to a node, use square brackets WITH QUOTES, but NEVER use the word "label:". 
+   - BAD: Auth[label: "fix-auth"]
+   - GOOD: Auth["fix-auth"]
+3. Keep the graph simple and clean.
+Return ONLY the Mermaid code block starting with 'graph TD'.`;
+    let result;
+    try {
+      // FIXED: Added hyphen to the model name
+      result = await generateText({
+        model: cerebras.chat('llama3.1-8b'),
+        system: systemPrompt,
+        prompt,
+      });
+    } catch (error) {
+      console.error(`[Sentinel] Model llama3.1-8b failed.`, error);
+      res.status(500).json({ error: 'Failed to generate diagram from Cerebras' });
+      return;
+    }
+
+    let diagram = result.text.trim();
+    const mermaidMatch = diagram.match(/```(?:mermaid)?\n?([\s\S]*?)```/i);
+    if (mermaidMatch && mermaidMatch[1]) {
+      diagram = mermaidMatch[1].trim();
+    }
+
+    res.json({ diagram });
+  } catch (error) {
+    console.error('Error in /api/team-map:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
